@@ -1,0 +1,16 @@
+{
+  "name": "cuddly-disco",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A simple two-tier application that displays encouraging messages for SREs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/natosullivan/cuddly-disco.git"
+  },
+  "devDependencies": {
+    "@semantic-release/commit-analyzer": "^11.1.0",
+    "@semantic-release/release-notes-generator": "^12.1.0",
+    "@semantic-release/github": "^9.2.6",
+    "semantic-release": "^23.0.0"
+  }
+}
