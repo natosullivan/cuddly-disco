@@ -5,20 +5,30 @@ interface ApiResponse {
   message: string
 }
 
+// Extend window interface for runtime config
+declare global {
+  interface Window {
+    APP_CONFIG?: {
+      VITE_LOCATION: string
+      VITE_BACKEND_URL: string
+    }
+  }
+}
+
 function App() {
   const [apiMessage, setApiMessage] = useState<string>('Loading...')
   const [location, setLocation] = useState<string>('Unknown')
   const [error, setError] = useState<boolean>(false)
 
   useEffect(() => {
-    // Get location from environment variable (injected at build/runtime)
-    const envLocation = import.meta.env.VITE_LOCATION
+    // Get location from runtime config (K8s) or build-time env (local dev)
+    const envLocation = window.APP_CONFIG?.VITE_LOCATION || import.meta.env.VITE_LOCATION
     if (envLocation) {
       setLocation(envLocation)
     }
 
-    // Fetch message from backend API
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
+    // Fetch message from backend API using runtime config (K8s) or build-time env (local dev)
+    const backendUrl = window.APP_CONFIG?.VITE_BACKEND_URL || import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
 
     fetch(`${backendUrl}/api/message`)
       .then(response => {

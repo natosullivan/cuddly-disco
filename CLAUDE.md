@@ -83,11 +83,26 @@ docker run -p 5000:5000 kind-words-backend
 - **Testing:** Pytest with Flask test client, includes probabilistic test for randomness
 
 ### Environment Variables
-Frontend requires two environment variables (set in `.env` or `.env.local`):
+
+**Frontend Environment Variables:**
+The frontend supports both build-time and runtime configuration:
+
+**Local Development (build-time via .env):**
 - `VITE_LOCATION` - Location string to display (default: "Unknown")
 - `VITE_BACKEND_URL` - Backend API URL (default: "http://localhost:5000")
 
 Copy `.env.example` to `.env` and customize values before running locally.
+
+**Kubernetes Deployment (runtime via ConfigMap):**
+- Environment variables are injected at container startup via `docker-entrypoint.sh`
+- Variables are written to `/usr/share/nginx/html/config.js` from ConfigMap values
+- The frontend reads from `window.APP_CONFIG` at runtime
+- This allows the same Docker image to be used across different environments
+
+**Implementation:**
+- `apps/frontend/public/config.js.template` - Template for runtime config
+- `apps/frontend/docker-entrypoint.sh` - Script that generates config.js from env vars
+- `apps/frontend/src/App.tsx` - Reads from `window.APP_CONFIG` or falls back to `import.meta.env`
 
 ### Key Design Patterns
 - Frontend is resilient - displays fallback message if backend is down
@@ -189,3 +204,193 @@ This architecture ensures:
 - Version numbers are consistent across Git tags and Docker images
 - Images are only published after all tests pass
 - No manual version management required
+
+## Kubernetes and GitOps Deployment
+
+The project supports deployment to Kubernetes using ArgoCD for GitOps-based continuous delivery.
+
+### Infrastructure as Code
+
+**Terraform Modules** (`infrastructure/modules/`):
+- `k8s/` - Creates Kind (Kubernetes in Docker) clusters locally
+  - Configurable node count, Kubernetes version, port mappings
+  - Auto-generates kubeconfig at `~/.kube/kind-{cluster-name}`
+  - Default port mappings: 30080 (ArgoCD UI), configurable application ports
+- `argocd/` - Installs ArgoCD via Helm chart
+  - NodePort service for local access
+  - Insecure mode for development (no TLS)
+  - ApplicationSet controller enabled
+
+**Dev Environment** (`infrastructure/dev/`):
+- Creates single-node Kind cluster (control-plane only)
+- Installs ArgoCD automatically
+- Port mappings: 30080 (ArgoCD), 30001 (frontend via NodePort → host 3000)
+
+**Terraform Commands:**
+```bash
+cd infrastructure/dev
+terraform init
+terraform plan
+terraform apply
+
+# Get ArgoCD admin password
+eval $(terraform output -raw argocd_admin_password_command)
+
+# Access ArgoCD UI
+open http://localhost:30080  # Login: admin/<password>
+```
+
+### Kubernetes Manifests
+
+**Frontend Helm Chart** (`k8s/frontend/`):
+The frontend is deployed using a Helm chart for better configurability and reusability.
+
+**Chart Structure:**
+- `Chart.yaml` - Chart metadata (version 0.1.0, appVersion 1.0.0)
+- `values.yaml` - Default configuration values
+  - `replicaCount: 2` - Number of pod replicas
+  - `image.repository` - Container image location
+  - `image.tag: v1.0.0` - Semantic version tag
+  - `config.viteLocation` - Location displayed in app
+  - `config.viteBackendUrl` - Backend service DNS name
+  - `service.type: NodePort` - Service type with nodePort 30001
+  - Resource limits and requests
+  - Health probe configurations
+- `templates/` - Kubernetes resource templates
+  - `_helpers.tpl` - Template helper functions
+  - `namespace.yaml` - Creates cuddly-disco-frontend namespace
+  - `configmap.yaml` - Environment variables ConfigMap
+  - `deployment.yaml` - Deployment with 2 replicas, health probes
+  - `service.yaml` - NodePort service on port 30001
+
+**Key Helm Features:**
+- Configurable via `values.yaml` or command-line overrides
+- Template helpers for consistent naming and labels
+- ConfigMap checksum triggers pod restarts on config changes
+- Automatic namespace creation
+- Support for different environments (dev, staging, prod)
+
+**ArgoCD Application** (`k8s/argocd-apps/`):
+- `frontend-app.yaml` - ArgoCD Application resource
+  - Source: GitHub repository, main branch, path: k8s/frontend
+  - Helm: Uses values.yaml from chart, supports value overrides
+  - Destination: cuddly-disco-frontend namespace
+  - Sync policy: Automated with prune and selfHeal enabled
+  - Automatic namespace creation
+
+### GitOps Workflow
+
+**Initial Setup:**
+```bash
+# 1. Create cluster and install ArgoCD
+cd infrastructure/dev && terraform apply
+
+# 2. Configure kubectl
+export KUBECONFIG=~/.kube/kind-kind-dev
+kubectl get nodes
+
+# 3. Deploy frontend application via ArgoCD
+kubectl apply -f k8s/argocd-apps/frontend-app.yaml
+
+# 4. Watch ArgoCD sync
+kubectl get applications -n argocd
+# Or use ArgoCD UI: http://localhost:30080
+
+# 5. Access frontend
+open http://localhost:3000
+```
+
+**Development Workflow:**
+1. Make changes to Helm chart in `k8s/frontend/` (templates or values.yaml)
+2. Commit and push to Git
+3. ArgoCD automatically detects changes and syncs (if automated sync enabled)
+4. Verify deployment: `kubectl get pods -n cuddly-disco-frontend`
+
+**Local Helm Testing:**
+```bash
+# Validate chart
+helm lint k8s/frontend
+
+# Preview rendered templates
+helm template frontend k8s/frontend
+
+# Test with custom values
+helm template frontend k8s/frontend --set image.tag=v1.2.0
+```
+
+**Deploying New Versions:**
+1. CI/CD builds and tags new image (e.g., `frontend:v1.2.3`)
+2. Update `k8s/frontend/values.yaml` with new image tag
+3. Commit and push
+4. ArgoCD syncs automatically
+
+**Override Values in ArgoCD:**
+Modify `k8s/argocd-apps/frontend-app.yaml`:
+```yaml
+source:
+  helm:
+    values: |
+      replicaCount: 3
+      image:
+        tag: v1.2.0
+```
+
+**Manual Sync:**
+```bash
+# Using ArgoCD CLI
+argocd app sync frontend
+
+# Or via kubectl
+kubectl patch application frontend -n argocd \
+  -p '{"operation":{"initiatedBy":{"automated":false}}}' \
+  --type merge
+```
+
+### Accessing Services
+
+**Frontend:**
+- **Local:** http://localhost:3000 (NodePort 30001 → host 3000)
+- **In-cluster:** `http://frontend-service.cuddly-disco-frontend.svc.cluster.local`
+
+**ArgoCD:**
+- **UI:** http://localhost:30080 (NodePort)
+- **Username:** `admin`
+- **Password:** `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`
+
+**Troubleshooting:**
+```bash
+# Check pod status
+kubectl get pods -n cuddly-disco-frontend
+
+# View pod logs
+kubectl logs -n cuddly-disco-frontend -l app=frontend
+
+# Describe pod for events
+kubectl describe pod -n cuddly-disco-frontend <pod-name>
+
+# Check ArgoCD app status
+kubectl get application frontend -n argocd -o yaml
+
+# Force sync
+argocd app sync frontend --force
+```
+
+### Key Kubernetes Concepts
+
+**Namespaces:**
+- `argocd` - ArgoCD installation
+- `cuddly-disco-frontend` - Frontend application
+- Future: `cuddly-disco-backend` for backend services
+
+**Service Types:**
+- **NodePort:** Exposes service on static port on each node (30000-32767 range)
+  - Frontend uses NodePort 30001
+  - Kind maps NodePort to host via extra_port_mappings
+- **ClusterIP:** Internal-only service (backend will use this)
+
+**GitOps Benefits:**
+- **Declarative:** Desired state in Git
+- **Auditable:** Git history = deployment history
+- **Automated:** Changes trigger deployments
+- **Rollback-friendly:** Git revert = application rollback
+- **Consistent:** Same process across environments

@@ -1,0 +1,5 @@
+// Runtime configuration injected by container entrypoint
+window.APP_CONFIG = {
+  VITE_LOCATION: '${VITE_LOCATION}',
+  VITE_BACKEND_URL: '${VITE_BACKEND_URL}'
+};
