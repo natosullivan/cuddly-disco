@@ -10,7 +10,6 @@ declare global {
   interface Window {
     APP_CONFIG?: {
       VITE_LOCATION: string
-      VITE_BACKEND_URL: string
     }
   }
 }
@@ -27,10 +26,13 @@ function App() {
       setLocation(envLocation)
     }
 
-    // Fetch message from backend API using runtime config (K8s) or build-time env (local dev)
-    const backendUrl = window.APP_CONFIG?.VITE_BACKEND_URL || import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
+    // Fetch message from backend API via nginx reverse proxy
+    // In K8s: nginx proxies /api to backend service
+    // In local dev: uses VITE_BACKEND_URL if set, otherwise localhost:5000
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
+    const apiPath = backendUrl ? `${backendUrl}/api/message` : '/api/message'
 
-    fetch(`${backendUrl}/api/message`)
+    fetch(apiPath)
       .then(response => {
         if (!response.ok) {
           throw new Error('Network response was not ok')

@@ -37,8 +37,6 @@ service:
 config:
   # Location displayed in the frontend
   viteLocation: "Kubernetes Dev"
-  # Backend service URL (K8s DNS name)
-  viteBackendUrl: "http://backend-service.cuddly-disco-backend.svc.cluster.local:5000"
 
 # Resource limits and requests
 resources:

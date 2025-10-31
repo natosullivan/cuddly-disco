@@ -98,8 +98,7 @@ describe('App', () => {
 
   it('uses runtime config from window.APP_CONFIG when available', async () => {
     window.APP_CONFIG = {
-      VITE_LOCATION: 'Kubernetes',
-      VITE_BACKEND_URL: 'http://backend-service:5000'
+      VITE_LOCATION: 'Kubernetes'
     }
 
     ;(global.fetch as any).mockResolvedValue({
@@ -113,8 +112,8 @@ describe('App', () => {
       expect(screen.getByText('Kubernetes')).toBeInTheDocument()
     })
 
-    // Verify it called the runtime config URL
-    expect(global.fetch).toHaveBeenCalledWith('http://backend-service:5000/api/message')
+    // Verify it uses relative URL (nginx reverse proxy in K8s)
+    expect(global.fetch).toHaveBeenCalledWith('/api/message')
   })
 
   it('falls back to import.meta.env when window.APP_CONFIG is not available', async () => {
@@ -134,5 +133,25 @@ describe('App', () => {
 
     // Verify it called the build-time env URL
     expect(global.fetch).toHaveBeenCalledWith('http://localhost:5000/api/message')
+  })
+
+  it('uses relative URL when VITE_BACKEND_URL is not set', async () => {
+    import.meta.env.VITE_LOCATION = 'Test Location'
+    // Explicitly unset VITE_BACKEND_URL - simulates K8s deployment scenario
+    import.meta.env.VITE_BACKEND_URL = ''
+
+    ;(global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: 'Proxied message' }),
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/Proxied message/)).toBeInTheDocument()
+    })
+
+    // Verify it uses relative URL for nginx reverse proxy
+    expect(global.fetch).toHaveBeenCalledWith('/api/message')
   })
 })

@@ -73,6 +73,11 @@ docker run -p 5000:5000 kind-words-backend
   - Uses CSS classes for error/success states
 - **Testing:** Uses Vitest with React Testing Library, mocks fetch globally
 - **Build System:** Vite configured to serve on 0.0.0.0:3000 for Docker compatibility
+- **Nginx Reverse Proxy:** Production deployments use nginx to proxy API requests
+  - Frontend makes relative API calls to `/api/message`
+  - Nginx proxies `/api` requests to backend service in Kubernetes
+  - Backend remains internal (ClusterIP) and not directly accessible to users
+  - Configuration: `apps/frontend/nginx.conf:18-25`
 
 ### Backend Architecture
 - **Single File Application:** `app.py` contains all routes and logic
@@ -81,6 +86,7 @@ docker run -p 5000:5000 kind-words-backend
   - `GET /health` - Health check endpoint
 - **CORS:** Enabled for all origins to allow frontend communication
 - **Testing:** Pytest with Flask test client, includes probabilistic test for randomness
+- **Service Type:** ClusterIP service in Kubernetes - only accessible within the cluster
 
 ### Environment Variables
 
@@ -89,11 +95,15 @@ The frontend supports both build-time and runtime configuration:
 
 **Local Development (build-time via .env):**
 - `VITE_LOCATION` - Location string to display (default: "Unknown")
-- `VITE_BACKEND_URL` - Backend API URL (default: "http://localhost:5000")
+- `VITE_BACKEND_URL` - Backend API URL for local development (default: "http://localhost:5000")
+  - When set, frontend uses this URL for API calls
+  - When not set, frontend uses relative URLs (`/api/message`) which nginx proxies to backend
 
 Copy `.env.example` to `.env` and customize values before running locally.
 
 **Kubernetes Deployment (runtime via ConfigMap):**
+- Only `VITE_LOCATION` is configured via ConfigMap
+- `VITE_BACKEND_URL` is NOT used in Kubernetes - nginx reverse proxy handles routing
 - Environment variables are injected at container startup via `docker-entrypoint.sh`
 - Variables are written to `/usr/share/nginx/html/config.js` from ConfigMap values
 - The frontend reads from `window.APP_CONFIG` at runtime
@@ -103,6 +113,7 @@ Copy `.env.example` to `.env` and customize values before running locally.
 - `apps/frontend/public/config.js.template` - Template for runtime config
 - `apps/frontend/docker-entrypoint.sh` - Script that generates config.js from env vars
 - `apps/frontend/src/App.tsx` - Reads from `window.APP_CONFIG` or falls back to `import.meta.env`
+- `apps/frontend/nginx.conf` - Proxies `/api` requests to backend service in Kubernetes
 
 ### Key Design Patterns
 - Frontend is resilient - displays fallback message if backend is down
@@ -252,7 +263,6 @@ The frontend is deployed using a Helm chart for better configurability and reusa
   - `image.repository` - Container image location
   - `image.tag: v1.0.0` - Semantic version tag
   - `config.viteLocation` - Location displayed in app
-  - `config.viteBackendUrl` - Backend service DNS name
   - `service.type: NodePort` - Service type with nodePort 30001
   - Resource limits and requests
   - Health probe configurations
@@ -269,6 +279,7 @@ The frontend is deployed using a Helm chart for better configurability and reusa
 - ConfigMap checksum triggers pod restarts on config changes
 - Automatic namespace creation
 - Support for different environments (dev, staging, prod)
+- **Nginx reverse proxy** for backend API access (keeps backend internal)
 
 **Backend Helm Chart** (`k8s/backend/`):
 The backend API is deployed using a Helm chart with internal-only access.
@@ -292,8 +303,16 @@ The backend API is deployed using a Helm chart with internal-only access.
 **Key Backend Features:**
 - **ClusterIP service** - Not accessible from outside the cluster
 - Only accessible via Kubernetes DNS: `backend-service.cuddly-disco-backend.svc.cluster.local:5000`
-- Frontend connects to backend using internal DNS name
-- No external exposure for security
+- Frontend nginx proxies `/api` requests to backend using internal DNS name
+- No external exposure for security - users cannot directly access the backend API
+
+**Frontend-Backend Connectivity:**
+The architecture uses nginx reverse proxy to keep the backend internal while allowing frontend access:
+1. User's browser loads the React app from frontend pod (NodePort 30001)
+2. React app makes API calls to relative URL `/api/message`
+3. Nginx in frontend pod proxies requests to `http://backend-service.cuddly-disco-backend.svc.cluster.local:5000/api/message`
+4. Backend responds to nginx, which forwards response to browser
+5. Backend service remains ClusterIP - inaccessible from outside the cluster
 
 **ArgoCD Applications** (`k8s/argocd-apps/`):
 - `frontend-app.yaml` - Frontend ArgoCD Application

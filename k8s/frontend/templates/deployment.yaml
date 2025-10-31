@@ -46,11 +46,6 @@ spec:
             configMapKeyRef:
               name: {{ include "frontend.fullname" . }}-config
               key: VITE_LOCATION
-        - name: VITE_BACKEND_URL
-          valueFrom:
-            configMapKeyRef:
-              name: {{ include "frontend.fullname" . }}-config
-              key: VITE_BACKEND_URL
         {{- with .Values.livenessProbe }}
         livenessProbe:
           {{- toYaml . | nindent 10 }}

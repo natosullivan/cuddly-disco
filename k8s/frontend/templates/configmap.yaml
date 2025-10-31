@@ -7,4 +7,3 @@ metadata:
     {{- include "frontend.labels" . | nindent 4 }}
 data:
   VITE_LOCATION: {{ .Values.config.viteLocation | quote }}
-  VITE_BACKEND_URL: {{ .Values.config.viteBackendUrl | quote }}
