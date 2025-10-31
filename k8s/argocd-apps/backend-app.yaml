@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: backend
+  namespace: argocd
+  # Finalizer ensures cascade delete
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/natosullivan/cuddly-disco
+    targetRevision: main
+    path: k8s/backend
+    helm:
+      # Use values.yaml from the chart
+      valueFiles:
+      - values.yaml
+      # Optional: Override specific values
+      # values: |
+      #   replicaCount: 3
+      #   image:
+      #     tag: v1.1.0
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cuddly-disco-backend
+
+  syncPolicy:
+    automated:
+      prune: true       # Remove resources when deleted from Git
+      selfHeal: true    # Revert manual changes
+      allowEmpty: false
+    syncOptions:
+    - CreateNamespace=true  # Create namespace if it doesn't exist
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

@@ -270,13 +270,42 @@ The frontend is deployed using a Helm chart for better configurability and reusa
 - Automatic namespace creation
 - Support for different environments (dev, staging, prod)
 
-**ArgoCD Application** (`k8s/argocd-apps/`):
-- `frontend-app.yaml` - ArgoCD Application resource
+**Backend Helm Chart** (`k8s/backend/`):
+The backend API is deployed using a Helm chart with internal-only access.
+
+**Chart Structure:**
+- `Chart.yaml` - Chart metadata (version 0.1.0, appVersion 1.0.0)
+- `values.yaml` - Default configuration values
+  - `replicaCount: 2` - Number of pod replicas
+  - `image.repository` - Container image location
+  - `image.tag: v1.0.0` - Semantic version tag
+  - `service.type: ClusterIP` - Internal-only service (not exposed externally)
+  - `service.port: 5000` - Internal service port
+  - Resource limits and requests
+  - Health probe configurations
+- `templates/` - Kubernetes resource templates
+  - `_helpers.tpl` - Template helper functions
+  - `namespace.yaml` - Creates cuddly-disco-backend namespace
+  - `deployment.yaml` - Deployment with 2 replicas, health probes
+  - `service.yaml` - ClusterIP service (internal only)
+
+**Key Backend Features:**
+- **ClusterIP service** - Not accessible from outside the cluster
+- Only accessible via Kubernetes DNS: `backend-service.cuddly-disco-backend.svc.cluster.local:5000`
+- Frontend connects to backend using internal DNS name
+- No external exposure for security
+
+**ArgoCD Applications** (`k8s/argocd-apps/`):
+- `frontend-app.yaml` - Frontend ArgoCD Application
   - Source: GitHub repository, main branch, path: k8s/frontend
   - Helm: Uses values.yaml from chart, supports value overrides
   - Destination: cuddly-disco-frontend namespace
   - Sync policy: Automated with prune and selfHeal enabled
-  - Automatic namespace creation
+- `backend-app.yaml` - Backend ArgoCD Application
+  - Source: GitHub repository, main branch, path: k8s/backend
+  - Helm: Uses values.yaml from chart, supports value overrides
+  - Destination: cuddly-disco-backend namespace
+  - Sync policy: Automated with prune and selfHeal enabled
 
 ### GitOps Workflow
 
@@ -289,14 +318,19 @@ cd infrastructure/dev && terraform apply
 export KUBECONFIG=~/.kube/kind-kind-dev
 kubectl get nodes
 
-# 3. Deploy frontend application via ArgoCD
+# 3. Deploy both frontend and backend applications via ArgoCD
+kubectl apply -f k8s/argocd-apps/backend-app.yaml
 kubectl apply -f k8s/argocd-apps/frontend-app.yaml
 
 # 4. Watch ArgoCD sync
 kubectl get applications -n argocd
 # Or use ArgoCD UI: http://localhost:30080
 
-# 5. Access frontend
+# 5. Verify deployments
+kubectl get pods -n cuddly-disco-backend
+kubectl get pods -n cuddly-disco-frontend
+
+# 6. Access frontend
 open http://localhost:3000
 ```
 
@@ -352,6 +386,15 @@ kubectl patch application frontend -n argocd \
 - **Local:** http://localhost:3000 (NodePort 30001 → host 3000)
 - **In-cluster:** `http://frontend-service.cuddly-disco-frontend.svc.cluster.local`
 
+**Backend:**
+- **Local:** Not exposed (ClusterIP only)
+- **In-cluster:** `http://backend-service.cuddly-disco-backend.svc.cluster.local:5000`
+- **Testing:** Use `kubectl port-forward` for local testing
+  ```bash
+  kubectl port-forward -n cuddly-disco-backend svc/backend-service 5000:5000
+  curl http://localhost:5000/health
+  ```
+
 **ArgoCD:**
 - **UI:** http://localhost:30080 (NodePort)
 - **Username:** `admin`
@@ -361,18 +404,27 @@ kubectl patch application frontend -n argocd \
 ```bash
 # Check pod status
 kubectl get pods -n cuddly-disco-frontend
+kubectl get pods -n cuddly-disco-backend
 
 # View pod logs
 kubectl logs -n cuddly-disco-frontend -l app=frontend
+kubectl logs -n cuddly-disco-backend -l app=backend
 
 # Describe pod for events
 kubectl describe pod -n cuddly-disco-frontend <pod-name>
+kubectl describe pod -n cuddly-disco-backend <pod-name>
 
 # Check ArgoCD app status
 kubectl get application frontend -n argocd -o yaml
+kubectl get application backend -n argocd -o yaml
 
 # Force sync
 argocd app sync frontend --force
+argocd app sync backend --force
+
+# Test backend connectivity from frontend pod
+kubectl exec -it -n cuddly-disco-frontend <frontend-pod> -- sh
+# Inside pod: curl http://backend-service.cuddly-disco-backend.svc.cluster.local:5000/health
 ```
 
 ### Key Kubernetes Concepts
@@ -380,13 +432,17 @@ argocd app sync frontend --force
 **Namespaces:**
 - `argocd` - ArgoCD installation
 - `cuddly-disco-frontend` - Frontend application
-- Future: `cuddly-disco-backend` for backend services
+- `cuddly-disco-backend` - Backend API
 
 **Service Types:**
 - **NodePort:** Exposes service on static port on each node (30000-32767 range)
   - Frontend uses NodePort 30001
   - Kind maps NodePort to host via extra_port_mappings
-- **ClusterIP:** Internal-only service (backend will use this)
+  - Accessible from outside the cluster
+- **ClusterIP:** Internal-only service (default)
+  - Backend uses ClusterIP on port 5000
+  - Only accessible from within the cluster
+  - Not exposed to external traffic
 
 **GitOps Benefits:**
 - **Declarative:** Desired state in Git
