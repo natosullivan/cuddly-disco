@@ -67,7 +67,7 @@ jobs:
 
       - name: Build frontend container
         working-directory: apps/frontend
-        run: docker build -f Dockerfile.prod -t cuddly-disco-frontend .
+        run: docker build -t cuddly-disco-frontend .
 
       - name: Save backend image
         run: docker save cuddly-disco-backend -o backend-image.tar
@@ -136,9 +136,9 @@ jobs:
 
       - name: Run frontend container
         run: |
-          docker run -d -p 3000:80 \
-            -e VITE_LOCATION="CI Test" \
-            -e VITE_BACKEND_URL="http://localhost:5000" \
+          docker run -d -p 3000:3000 \
+            -e LOCATION="CI Test" \
+            -e BACKEND_URL="http://localhost:5000" \
             --name frontend \
             cuddly-disco-frontend
 
