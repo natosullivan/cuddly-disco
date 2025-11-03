@@ -41,11 +41,16 @@ spec:
           containerPort: {{ .Values.service.targetPort }}
           protocol: TCP
         env:
-        - name: VITE_LOCATION
+        - name: LOCATION
           valueFrom:
             configMapKeyRef:
               name: {{ include "frontend.fullname" . }}-config
-              key: VITE_LOCATION
+              key: LOCATION
+        - name: BACKEND_URL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "frontend.fullname" . }}-config
+              key: BACKEND_URL
         {{- with .Values.livenessProbe }}
         livenessProbe:
           {{- toYaml . | nindent 10 }}

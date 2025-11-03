@@ -6,4 +6,5 @@ metadata:
   labels:
     {{- include "frontend.labels" . | nindent 4 }}
 data:
-  VITE_LOCATION: {{ .Values.config.viteLocation | quote }}
+  LOCATION: {{ .Values.config.location | quote }}
+  BACKEND_URL: {{ .Values.config.backendUrl | quote }}

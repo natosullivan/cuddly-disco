@@ -1,0 +1,48 @@
+# Dependencies
+node_modules
+npm-debug.log
+
+# Testing
+coverage
+.vitest
+
+# Next.js
+.next
+out
+
+# Production
+build
+dist
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+*.log
+*.log.*
+
+# Local env files
+.env
+.env*.local
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# Old Vite files (no longer needed)
+src
+tests
+vite.config.ts
+index.html
