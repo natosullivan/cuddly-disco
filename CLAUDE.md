@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Cuddly-disco is a simple two-tier application that displays encouraging messages. The frontend shows "For all the SREs out there, here are some kind words from [location]: [message]", where the location comes from an environment variable and the message is fetched from a Python backend API.
 
 **Tech Stack:**
-- Frontend: React 18 + TypeScript + Vite (port 3000)
+- Frontend: React 18 + TypeScript + Next.js 14 (port 3000)
 - Backend: Python 3.11+ + Flask (port 5000)
 - Both services run in Docker containers
 
@@ -28,14 +28,11 @@ npm run build
 # Run all tests
 npm test
 
-# Preview production build
-npm preview
-
 # Docker build and run
 docker build -t kind-words-frontend .
 docker run -p 3000:3000 \
-  -e VITE_LOCATION="San Francisco" \
-  -e VITE_BACKEND_URL="http://localhost:5000" \
+  -e LOCATION="San Francisco" \
+  -e BACKEND_URL="http://localhost:5000" \
   kind-words-frontend
 ```
 
@@ -65,19 +62,22 @@ docker run -p 5000:5000 kind-words-backend
 ## Architecture
 
 ### Frontend Architecture
-- **Entry Point:** `src/main.tsx` renders the root `App` component
-- **Main Component:** `src/App.tsx` handles all application logic
-  - Fetches location from `VITE_LOCATION` environment variable
-  - Makes API call to backend `/api/message` endpoint on mount
+- **Framework:** Next.js 14 with App Router (Server-Side Rendering)
+- **Entry Point:** `app/layout.tsx` defines the root layout with metadata
+- **Main Page:** `app/page.tsx` Server Component that handles application logic
+  - Fetches location from `LOCATION` environment variable
+  - Makes server-side API call to backend `/api/message` endpoint before page render
   - Displays fallback message if backend is unavailable
   - Uses CSS classes for error/success states
-- **Testing:** Uses Vitest with React Testing Library, mocks fetch globally
-- **Build System:** Vite configured to serve on 0.0.0.0:3000 for Docker compatibility
-- **Nginx Reverse Proxy:** Production deployments use nginx to proxy API requests
-  - Frontend makes relative API calls to `/api/message`
-  - Nginx proxies `/api` requests to backend service in Kubernetes
-  - Backend remains internal (ClusterIP) and not directly accessible to users
-  - Configuration: `apps/frontend/nginx.conf:18-25`
+  - No client-side loading state - content is pre-rendered on server
+- **Health Endpoint:** `app/api/health/route.ts` provides `/api/health` for Kubernetes probes
+- **Testing:** Uses Vitest with React Testing Library for Server Component testing
+- **Build System:** Next.js standalone mode for optimized Docker images (~100MB)
+- **Server-Side Rendering:** Eliminates nginx dependency, Next.js server handles all requests
+  - Backend API calls happen on the Next.js server (not in browser)
+  - Direct server-to-server communication with backend service
+  - Backend remains internal (ClusterIP) and not accessible to users
+  - Configuration: `next.config.mjs` and environment variables
 
 ### Backend Architecture
 - **Single File Application:** `app.py` contains all routes and logic
@@ -90,44 +90,58 @@ docker run -p 5000:5000 kind-words-backend
 
 ### Environment Variables
 
-**Frontend Environment Variables:**
-The frontend supports both build-time and runtime configuration:
+**Frontend Environment Variables (Next.js):**
+The frontend uses server-side environment variables read at runtime:
 
-**Local Development (build-time via .env):**
-- `VITE_LOCATION` - Location string to display (default: "Unknown")
-- `VITE_BACKEND_URL` - Backend API URL for local development (default: "http://localhost:5000")
-  - When set, frontend uses this URL for API calls
-  - When not set, frontend uses relative URLs (`/api/message`) which nginx proxies to backend
+**Environment Variables:**
+- `LOCATION` - Location string to display (default: "Unknown")
+  - Accessed in Server Component via `process.env.LOCATION`
+  - Set via Docker `-e` flag or Kubernetes ConfigMap
+- `BACKEND_URL` - Backend API URL for server-side API calls
+  - Default: `http://localhost:5000` (local development)
+  - Kubernetes: `http://backend-service.cuddly-disco-backend.svc.cluster.local:5000`
+  - Accessed in Server Component via `process.env.BACKEND_URL`
+  - Server-to-server communication (not exposed to browser)
 
-Copy `.env.example` to `.env` and customize values before running locally.
+**Local Development:**
+Set environment variables when running Docker:
+```bash
+docker run -p 3000:3000 \
+  -e LOCATION="San Francisco" \
+  -e BACKEND_URL="http://localhost:5000" \
+  kind-words-frontend
+```
 
-**Kubernetes Deployment (runtime via ConfigMap):**
-- Only `VITE_LOCATION` is configured via ConfigMap
-- `VITE_BACKEND_URL` is NOT used in Kubernetes - nginx reverse proxy handles routing
-- Environment variables are injected at container startup via `docker-entrypoint.sh`
-- Variables are written to `/usr/share/nginx/html/config.js` from ConfigMap values
-- The frontend reads from `window.APP_CONFIG` at runtime
-- This allows the same Docker image to be used across different environments
+**Kubernetes Deployment:**
+Environment variables are injected via ConfigMap at container startup:
+- ConfigMap defines `LOCATION` and `BACKEND_URL`
+- Next.js server reads variables from `process.env`
+- No runtime injection needed - Next.js handles environment variables natively
+- Same Docker image works across environments by changing ConfigMap values
 
 **Implementation:**
-- `apps/frontend/public/config.js.template` - Template for runtime config
-- `apps/frontend/docker-entrypoint.sh` - Script that generates config.js from env vars
-- `apps/frontend/src/App.tsx` - Reads from `window.APP_CONFIG` or falls back to `import.meta.env`
-- `apps/frontend/nginx.conf` - Proxies `/api` requests to backend service in Kubernetes
+- `app/page.tsx` - Reads `process.env.LOCATION` and `process.env.BACKEND_URL`
+- `next.config.mjs` - Configures Next.js environment variable handling
+- `k8s/frontend/templates/configmap.yaml` - Kubernetes ConfigMap with env vars
+- `k8s/frontend/templates/deployment.yaml` - Injects ConfigMap into pod environment
 
 ### Key Design Patterns
 - Frontend is resilient - displays fallback message if backend is down
 - Backend message pool is defined in `MESSAGES` constant in `app.py:8-14`
 - Tests verify both happy path and error states
-- Frontend uses TypeScript interfaces for type safety (`ApiResponse` in App.tsx:4-6)
+- Frontend uses TypeScript interfaces for type safety (`ApiResponse` in `app/page.tsx`)
+- Server-Side Rendering eliminates loading states and improves SEO
+- Direct server-to-server communication keeps backend internal and secure
 
 ## Testing Philosophy
 
-### Frontend Tests (apps/frontend/tests/App.test.tsx)
-- Tests cover all component states: loading, success, error
-- Mocks `fetch` API globally using Vitest
-- Verifies environment variable handling
+### Frontend Tests (apps/frontend/__tests__/page.test.tsx)
+- Tests cover Server Component rendering: success and error states
+- Mocks `fetch` API globally for server-side testing
+- Verifies environment variable handling (`LOCATION` and `BACKEND_URL`)
 - Checks CSS class application for styling states
+- Tests server-side rendering output (no loading state)
+- Health endpoint tests in `__tests__/health.test.ts`
 
 ### Backend Tests (apps/backend/test_app.py)
 - Uses pytest fixtures for test client
@@ -175,8 +189,9 @@ The `container-tests` job validates the full Docker deployment:
 6. Runs frontend integration tests (`.github/scripts/test-frontend-container.sh`)
    - Validates frontend is accessible and returns 200
    - Verifies HTML contains app title
-   - Verifies React app loads correctly
-   - Checks React app structure is correct
+   - Verifies Next.js bundle is loaded (`_next/static`)
+   - Validates server-side rendering (pre-rendered content)
+   - Tests health endpoint at `/api/health`
 7. Shows container logs on failure for debugging
 8. Always cleans up containers after tests
 
@@ -234,8 +249,14 @@ The project supports deployment to Kubernetes using ArgoCD for GitOps-based cont
 
 **Dev Environment** (`infrastructure/dev/`):
 - Creates single-node Kind cluster (control-plane only)
-- Installs ArgoCD automatically
+- Installs ArgoCD automatically (insecure mode)
 - Port mappings: 30080 (ArgoCD), 30001 (frontend via NodePort → host 3000)
+
+**Prod Environment** (`infrastructure/prod/`):
+- Creates multi-node Kind cluster (1 control-plane + 2 workers)
+- Installs ArgoCD automatically (TLS enabled)
+- Port mappings: 30080 (ArgoCD), 30001 (frontend via NodePort → host 3000)
+- Production-ready configuration for local testing
 
 **Terraform Commands:**
 ```bash
@@ -262,16 +283,18 @@ The frontend is deployed using a Helm chart for better configurability and reusa
   - `replicaCount: 2` - Number of pod replicas
   - `image.repository` - Container image location
   - `image.tag: v1.0.0` - Semantic version tag
-  - `config.viteLocation` - Location displayed in app
+  - `config.location` - Location displayed in app
+  - `config.backendUrl` - Backend service URL (internal Kubernetes DNS)
   - `service.type: NodePort` - Service type with nodePort 30001
+  - `service.port: 3000` - Next.js server port
   - Resource limits and requests
   - Health probe configurations
 - `templates/` - Kubernetes resource templates
   - `_helpers.tpl` - Template helper functions
   - `namespace.yaml` - Creates cuddly-disco-frontend namespace
-  - `configmap.yaml` - Environment variables ConfigMap
-  - `deployment.yaml` - Deployment with 2 replicas, health probes
-  - `service.yaml` - NodePort service on port 30001
+  - `configmap.yaml` - Environment variables ConfigMap (LOCATION, BACKEND_URL)
+  - `deployment.yaml` - Deployment with 2 replicas, health probes at `/api/health`
+  - `service.yaml` - NodePort service on port 30001 → container port 3000
 
 **Key Helm Features:**
 - Configurable via `values.yaml` or command-line overrides
@@ -279,7 +302,7 @@ The frontend is deployed using a Helm chart for better configurability and reusa
 - ConfigMap checksum triggers pod restarts on config changes
 - Automatic namespace creation
 - Support for different environments (dev, staging, prod)
-- **Nginx reverse proxy** for backend API access (keeps backend internal)
+- **Next.js SSR** for server-side rendering and direct backend communication
 
 **Backend Helm Chart** (`k8s/backend/`):
 The backend API is deployed using a Helm chart with internal-only access.
@@ -303,16 +326,18 @@ The backend API is deployed using a Helm chart with internal-only access.
 **Key Backend Features:**
 - **ClusterIP service** - Not accessible from outside the cluster
 - Only accessible via Kubernetes DNS: `backend-service.cuddly-disco-backend.svc.cluster.local:5000`
-- Frontend nginx proxies `/api` requests to backend using internal DNS name
+- Next.js frontend makes server-side calls to backend using internal DNS name
 - No external exposure for security - users cannot directly access the backend API
 
 **Frontend-Backend Connectivity:**
-The architecture uses nginx reverse proxy to keep the backend internal while allowing frontend access:
-1. User's browser loads the React app from frontend pod (NodePort 30001)
-2. React app makes API calls to relative URL `/api/message`
-3. Nginx in frontend pod proxies requests to `http://backend-service.cuddly-disco-backend.svc.cluster.local:5000/api/message`
-4. Backend responds to nginx, which forwards response to browser
-5. Backend service remains ClusterIP - inaccessible from outside the cluster
+The architecture uses Next.js Server-Side Rendering for direct server-to-server communication:
+1. User's browser requests a page from frontend pod (NodePort 30001)
+2. Next.js Server Component executes on the server before rendering
+3. Server Component makes direct API call to `http://backend-service.cuddly-disco-backend.svc.cluster.local:5000/api/message`
+4. Backend responds to Next.js server (server-to-server, not exposed to browser)
+5. Next.js server renders the page with backend data and sends complete HTML to browser
+6. Backend service remains ClusterIP - inaccessible from outside the cluster
+7. No client-side API calls or loading states - everything is pre-rendered
 
 **ArgoCD Applications** (`k8s/argocd-apps/`):
 - `frontend-app.yaml` - Frontend ArgoCD Application

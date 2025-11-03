@@ -6,7 +6,7 @@ A simple two-tier application that displays encouraging messages. The frontend s
 
 ## Architecture
 
-- **Frontend**: React + TypeScript + Vite (port 3000)
+- **Frontend**: React 18 + TypeScript + Next.js 14 with Server-Side Rendering (port 3000)
 - **Backend**: Python + Flask (port 5000)
 - Both services run in separate Docker containers
 
@@ -20,13 +20,25 @@ A simple two-tier application that displays encouraging messages. The frontend s
 │   │   ├── test_app.py
 │   │   ├── requirements.txt
 │   │   └── Dockerfile
-│   └── frontend/         # React TypeScript app
-│       ├── src/
-│       ├── tests/
+│   └── frontend/         # Next.js TypeScript app (SSR)
+│       ├── app/          # Next.js App Router
+│       │   ├── page.tsx
+│       │   ├── layout.tsx
+│       │   ├── globals.css
+│       │   └── api/health/
+│       ├── __tests__/    # Vitest tests
 │       ├── package.json
-│       ├── vite.config.ts
+│       ├── next.config.mjs
+│       ├── vitest.config.ts
 │       └── Dockerfile
-├── .env.example
+├── k8s/                  # Kubernetes manifests
+│   ├── frontend/         # Frontend Helm chart
+│   ├── backend/          # Backend Helm chart
+│   └── argocd-apps/      # ArgoCD applications
+├── infrastructure/       # Terraform IaC
+│   ├── dev/              # Dev environment
+│   ├── prod/             # Prod environment
+│   └── modules/          # Terraform modules
 └── README.md
 ```
 
@@ -40,15 +52,9 @@ A simple two-tier application that displays encouraging messages. The frontend s
 
 ### 1. Set up environment variables
 
-Copy the example environment file and customize it:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set your preferred values:
-- `VITE_LOCATION`: Your location (e.g., "San Francisco")
-- `VITE_BACKEND_URL`: Backend API URL (default: http://localhost:5000)
+For local development, environment variables are passed directly to Docker containers:
+- `LOCATION`: Your location (e.g., "San Francisco")
+- `BACKEND_URL`: Backend API URL (default: http://localhost:5000)
 
 ### 2. Run the Backend
 
@@ -76,8 +82,8 @@ docker build -t kind-words-frontend .
 
 # Run the container with environment variables
 docker run -p 3000:3000 \
-  -e VITE_LOCATION="San Francisco" \
-  -e VITE_BACKEND_URL="http://localhost:5000" \
+  -e LOCATION="San Francisco" \
+  -e BACKEND_URL="http://localhost:5000" \
   kind-words-frontend
 ```
 
@@ -190,21 +196,24 @@ python app.py
 ```bash
 cd apps/frontend
 npm install
+
+# Set environment variables and run dev server
+export LOCATION="San Francisco"
+export BACKEND_URL="http://localhost:5000"
 npm run dev
 ```
 
-Set environment variables in `apps/frontend/.env.local`:
-```
-VITE_LOCATION=San Francisco
-VITE_BACKEND_URL=http://localhost:5000
+Or set environment variables inline:
+```bash
+LOCATION="San Francisco" BACKEND_URL="http://localhost:5000" npm run dev
 ```
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VITE_LOCATION` | Location displayed in the message | "Unknown" |
-| `VITE_BACKEND_URL` | Backend API URL | "http://localhost:5000" |
+| `LOCATION` | Location displayed in the message | "Unknown" |
+| `BACKEND_URL` | Backend API URL (server-side) | "http://localhost:5000" |
 
 ## Encouraging Messages
 
