@@ -9,7 +9,7 @@ image:
   # Image pull policy
   pullPolicy: Always
   # Override the image tag (defaults to chart appVersion)
-  tag: "v1.0.0"
+  tag: "v1.0.4"
 
 # Image pull secrets for private registries
 imagePullSecrets: []
@@ -36,7 +36,7 @@ service:
 # Application configuration
 config:
   # Location displayed in the frontend (Next.js env var)
-  location: "Kubernetes Dev"
+  location: "Sydney"
   # Backend service URL (internal Kubernetes DNS)
   backendUrl: "http://backend-service.cuddly-disco-backend.svc.cluster.local:5000"
 
