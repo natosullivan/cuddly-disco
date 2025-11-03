@@ -7,8 +7,13 @@ A simple two-tier application that displays encouraging messages. The frontend s
 ## Architecture
 
 - **Frontend**: React 18 + TypeScript + Next.js 14 with Server-Side Rendering (port 3000)
+  - 2-second fetch timeout using AbortController for backend resilience
+  - Graceful degradation when backend is unavailable
+  - Health endpoint at `/api/health` for Kubernetes probes
 - **Backend**: Python + Flask (port 5000)
+  - ClusterIP service in Kubernetes (internal-only access)
 - Both services run in separate Docker containers
+- Kubernetes deployment with startup probes and health checks
 
 ## Project Structure
 
@@ -175,11 +180,14 @@ The workflow is defined in `.github/workflows/ci.yml`, test scripts are in `.git
 ## Features
 
 - ✅ Frontend runs independently even if backend is unavailable
-- ✅ Displays fallback message if API call fails
+- ✅ 2-second fetch timeout prevents server hanging during SSR
+- ✅ Displays fallback message if API call fails or times out
+- ✅ Kubernetes startup probe (60s grace period) prevents CrashLoopBackOff
 - ✅ Environment variable configuration for location
 - ✅ Random encouraging messages from backend
-- ✅ Comprehensive test coverage for both services
+- ✅ Comprehensive test coverage for both services (18 frontend + 5 backend tests)
 - ✅ Containerized deployment with Docker
+- ✅ Server-Side Rendering with Next.js for improved performance and SEO
 
 ## Development
 

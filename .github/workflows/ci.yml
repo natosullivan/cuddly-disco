@@ -136,7 +136,7 @@ jobs:
 
       - name: Run frontend container
         run: |
-          docker run -d -p 3000:3000 \
+          docker run -d -p 3001:3000 \
             -e LOCATION="CI Test" \
             -e BACKEND_URL="http://localhost:5000" \
             --name frontend \
@@ -146,7 +146,7 @@ jobs:
         run: |
           echo "Waiting for frontend to start..."
           for i in {1..30}; do
-            if curl -s http://localhost:3000 > /dev/null; then
+            if curl -s http://localhost:3001 > /dev/null; then
               echo "Frontend is ready!"
               exit 0
             fi

@@ -167,4 +167,76 @@ describe('Home Page (Server Component)', () => {
       })
     )
   })
+
+  it('handles slow backend responses with timeout', async () => {
+    // Mock fetch to respect the abort signal and reject when aborted
+    ;(global.fetch as any).mockImplementation((url: string, options: any) => {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          resolve({
+            ok: true,
+            json: async () => ({ message: 'Slow response' }),
+          })
+        }, 3000) // Delay 3 seconds (longer than the 2 second timeout)
+
+        // Listen to the abort signal
+        if (options?.signal) {
+          options.signal.addEventListener('abort', () => {
+            clearTimeout(timeout)
+            reject(new Error('The operation was aborted'))
+          })
+        }
+      })
+    })
+
+    const page = await Home()
+    render(page)
+
+    // Should show error message due to timeout
+    expect(screen.getByText(/Unable to connect to backend service/)).toBeInTheDocument()
+  })
+
+  it('handles fetch abortion gracefully', async () => {
+    // Mock fetch to reject with abort error
+    ;(global.fetch as any).mockRejectedValue(new Error('The operation was aborted'))
+
+    const page = await Home()
+    render(page)
+
+    expect(screen.getByText(/Unable to connect to backend service/)).toBeInTheDocument()
+  })
+
+  it('passes AbortSignal to fetch call', async () => {
+    ;(global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: 'Test message' }),
+    })
+
+    await Home()
+
+    // Verify that fetch was called with signal parameter
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        cache: 'no-store',
+        signal: expect.any(AbortSignal),
+      })
+    )
+  })
+
+  it('clears timeout when fetch succeeds quickly', async () => {
+    const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout')
+
+    ;(global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: 'Fast response' }),
+    })
+
+    await Home()
+
+    // Verify clearTimeout was called (timeout was cleaned up)
+    expect(clearTimeoutSpy).toHaveBeenCalled()
+
+    clearTimeoutSpy.mockRestore()
+  })
 })

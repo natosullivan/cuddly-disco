@@ -67,7 +67,8 @@ docker run -p 5000:5000 kind-words-backend
 - **Main Page:** `app/page.tsx` Server Component that handles application logic
   - Fetches location from `LOCATION` environment variable
   - Makes server-side API call to backend `/api/message` endpoint before page render
-  - Displays fallback message if backend is unavailable
+  - **Fetch Timeout:** 2-second timeout using AbortController prevents server hanging
+  - Displays fallback message if backend is unavailable or times out
   - Uses CSS classes for error/success states
   - No client-side loading state - content is pre-rendered on server
 - **Health Endpoint:** `app/api/health/route.ts` provides `/api/health` for Kubernetes probes
@@ -126,9 +127,13 @@ Environment variables are injected via ConfigMap at container startup:
 - `k8s/frontend/templates/deployment.yaml` - Injects ConfigMap into pod environment
 
 ### Key Design Patterns
-- Frontend is resilient - displays fallback message if backend is down
+- **Frontend Resilience:**
+  - 2-second fetch timeout prevents server hanging when backend unavailable
+  - Displays fallback message if backend is down or times out
+  - Kubernetes startup probe (60s grace period) prevents premature pod termination
+  - Health probes at `/api/health` enable automatic recovery
 - Backend message pool is defined in `MESSAGES` constant in `app.py:8-14`
-- Tests verify both happy path and error states
+- Tests verify both happy path and error states (including timeout scenarios)
 - Frontend uses TypeScript interfaces for type safety (`ApiResponse` in `app/page.tsx`)
 - Server-Side Rendering eliminates loading states and improves SEO
 - Direct server-to-server communication keeps backend internal and secure
@@ -141,7 +146,9 @@ Environment variables are injected via ConfigMap at container startup:
 - Verifies environment variable handling (`LOCATION` and `BACKEND_URL`)
 - Checks CSS class application for styling states
 - Tests server-side rendering output (no loading state)
+- **Timeout tests:** Verifies AbortController timeout (2s), fetch abortion handling, and signal passing
 - Health endpoint tests in `__tests__/health.test.ts`
+- Total: 18 tests (15 page tests + 3 health tests)
 
 ### Backend Tests (apps/backend/test_app.py)
 - Uses pytest fixtures for test client
@@ -185,12 +192,14 @@ The `container-tests` job validates the full Docker deployment:
    - Validates `/health` endpoint returns healthy status
    - Validates `/api/message` endpoint returns 200 with valid JSON
    - Verifies message content matches expected values
-5. Starts frontend container with environment variables
+5. Starts frontend container with environment variables on **port 3001** (avoids conflicts with local k8s)
 6. Runs frontend integration tests (`.github/scripts/test-frontend-container.sh`)
+   - Uses configurable PORT (defaults to 3001)
    - Validates frontend is accessible and returns 200
    - Verifies HTML contains app title
    - Verifies Next.js bundle is loaded (`_next/static`)
    - Validates server-side rendering (pre-rendered content)
+   - **Tests backend unavailability handling** (graceful degradation with timeout)
    - Tests health endpoint at `/api/health`
 7. Shows container logs on failure for debugging
 8. Always cleans up containers after tests
@@ -288,7 +297,10 @@ The frontend is deployed using a Helm chart for better configurability and reusa
   - `service.type: NodePort` - Service type with nodePort 30001
   - `service.port: 3000` - Next.js server port
   - Resource limits and requests
-  - Health probe configurations
+  - **Health probe configurations:**
+    - `startupProbe` - 60s grace period for initial startup (prevents CrashLoopBackOff)
+    - `livenessProbe` - Restarts unhealthy pods
+    - `readinessProbe` - Routes traffic only to ready pods
 - `templates/` - Kubernetes resource templates
   - `_helpers.tpl` - Template helper functions
   - `namespace.yaml` - Creates cuddly-disco-frontend namespace

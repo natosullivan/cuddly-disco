@@ -10,10 +10,18 @@ async function getBackendMessage(): Promise<{ message: string; error: boolean }>
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000'
     const apiUrl = `${backendUrl}/api/message`
 
+    // Create an AbortController to timeout the fetch after 2 seconds
+    // This prevents the Next.js server from hanging if the backend is unavailable
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 2000)
+
     const response = await fetch(apiUrl, {
       // Disable caching to always get fresh messages
       cache: 'no-store',
+      signal: controller.signal,
     })
+
+    clearTimeout(timeoutId) // Clear timeout if fetch succeeds
 
     if (!response.ok) {
       throw new Error(`Backend responded with status: ${response.status}`)

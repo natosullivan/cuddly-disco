@@ -69,6 +69,18 @@ readinessProbe:
   timeoutSeconds: 3
   failureThreshold: 3
 
+# Startup probe configuration
+# Gives the container up to 60 seconds to start (12 * 5 = 60s)
+# This prevents the container from being killed during slow startups
+startupProbe:
+  httpGet:
+    path: /api/health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 12
+
 # Pod annotations
 podAnnotations: {}
 
