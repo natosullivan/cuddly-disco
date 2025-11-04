@@ -68,3 +68,39 @@ p {
 strong {
   font-weight: 600;
 }
+
+/* Advertisement box */
+.advertisement {
+  margin-top: 2rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  color: white;
+}
+
+.advertisement p {
+  margin: 0.5rem 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: white;
+}
+
+.ad-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem !important;
+}
+
+.ad-tagline {
+  font-size: 0.95rem;
+  font-style: italic;
+  opacity: 0.95;
+}
+
+.ad-features {
+  font-size: 0.85rem;
+  margin-top: 0.7rem !important;
+  opacity: 0.9;
+}

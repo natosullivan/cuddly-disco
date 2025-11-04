@@ -41,7 +41,7 @@ describe('Home Page (Server Component)', () => {
     render(page)
 
     expect(screen.getByText('San Francisco')).toBeInTheDocument()
-    expect(screen.getByText(/For all the SREs out there, here are some kind words from/)).toBeInTheDocument()
+    expect(screen.getByText(/For all the SRE\/DevOps\/Platform engineers out there, here are some kind words from/)).toBeInTheDocument()
   })
 
   it('displays message from backend API', async () => {

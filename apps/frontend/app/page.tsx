@@ -49,8 +49,13 @@ export default async function Home() {
     <div className="App">
       <h1>cuddly-disco.ai</h1>
       <p className={error ? 'error-message' : 'success-message'}>
-        For all the SREs out there, here are some kind words from <strong>{location}</strong>: {message}
+        For all the SRE/DevOps/Platform engineers out there, here are some kind words from <strong>{location}</strong>: {message}
       </p>
+      <div className="advertisement">
+        <p className="ad-title">🥛 Milk as a Service (MaaS)</p>
+        <p className="ad-tagline">Cloud-native dairy delivered on demand</p>
+        <p className="ad-features">✓ 99.9% uptime ✓ Auto-scaling freshness ✓ Enterprise support</p>
+      </div>
     </div>
   )
 }

@@ -34,7 +34,7 @@ echo "✅ Next.js bundle is loaded"
 
 # Verify server-side rendering works
 echo "Testing server-side rendering..."
-if ! echo "$FRONTEND_RESPONSE" | grep -q 'For all the SREs out there'; then
+if ! echo "$FRONTEND_RESPONSE" | grep -q 'For all the SRE/DevOps/Platform engineers out there'; then
   echo "❌ Frontend is not server-rendered!"
   exit 1
 fi
