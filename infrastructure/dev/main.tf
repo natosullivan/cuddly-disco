@@ -5,7 +5,7 @@ module "k8s" {
   kubernetes_version = var.kubernetes_version
   num_worker_nodes   = var.num_worker_nodes
 
-  # Expose ArgoCD UI and frontend ports
+  # Expose Gateway API (30001 → host 3000)
   extra_port_mappings = var.extra_port_mappings
 }
 
@@ -19,4 +19,16 @@ module "argocd" {
   server_service_type = "NodePort"
   server_nodeport     = 30080
   enable_insecure     = true # For local dev without TLS
+}
+
+module "istio" {
+  source = "../modules/istio"
+
+  # Depends on cluster being ready
+  depends_on = [module.k8s]
+
+  kubeconfig_path  = module.k8s.kubeconfig_path
+  namespace        = "istio-system"
+  gateway_hostname = "dev.cuddly-disco.ai.localhost"
+  gateway_name     = "cuddly-disco-gateway"
 }

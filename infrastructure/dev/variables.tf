@@ -25,7 +25,7 @@ variable "extra_port_mappings" {
   }))
   default = [
     {
-      container_port = 3000
+      container_port = 30001
       host_port      = 3000
       protocol       = "TCP"
     }

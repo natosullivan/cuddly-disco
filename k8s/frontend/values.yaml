@@ -1,7 +1,7 @@
 # Default values for frontend Helm chart
 
 # Number of replicas for the frontend deployment
-replicaCount: 2
+replicaCount: 1
 
 image:
   # Container registry and repository
@@ -27,11 +27,18 @@ namespace:
 
 # Service configuration
 service:
-  type: NodePort
+  type: ClusterIP
   port: 3000
   targetPort: 3000
-  nodePort: 30001
   annotations: {}
+
+# Gateway configuration for Kubernetes Gateway API
+gateway:
+  # Hostname for HTTPRoute (environment-specific)
+  hostname: "cuddly-disco.ai.localhost"
+  # Gateway reference (deployed in istio-system namespace)
+  name: "cuddly-disco-gateway"
+  namespace: "istio-system"
 
 # Application configuration
 config:

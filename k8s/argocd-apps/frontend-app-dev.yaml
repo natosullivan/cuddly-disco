@@ -17,8 +17,10 @@ spec:
       # Use values.yaml from the chart
       valueFiles:
       - values.yaml
-      # Override gateway hostname for prod environment (uses default from values.yaml)
-      # Hostname is already set to cuddly-disco.ai.localhost in values.yaml
+      # Override gateway hostname for dev environment
+      values: |
+        gateway:
+          hostname: "dev.cuddly-disco.ai.localhost"
 
   destination:
     server: https://kubernetes.default.svc

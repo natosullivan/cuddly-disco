@@ -250,21 +250,29 @@ The project supports deployment to Kubernetes using ArgoCD for GitOps-based cont
 - `k8s/` - Creates Kind (Kubernetes in Docker) clusters locally
   - Configurable node count, Kubernetes version, port mappings
   - Auto-generates kubeconfig at `~/.kube/kind-{cluster-name}`
-  - Default port mappings: 30080 (ArgoCD UI), configurable application ports
+  - Default port mappings: 30080 (ArgoCD UI), 30001 (Gateway API → host 3000)
 - `argocd/` - Installs ArgoCD via Helm chart
   - NodePort service for local access
   - Insecure mode for development (no TLS)
   - ApplicationSet controller enabled
+- `istio/` - Installs Istio and Gateway API for ingress
+  - Installs Gateway API CRDs
+  - Installs Istio base, istiod, and gateway charts
+  - Creates Gateway resource with configurable hostname
+  - Gateway-only mode (no service mesh/sidecar injection)
+  - Gateway API automatically provisions infrastructure on NodePort 30001
 
 **Dev Environment** (`infrastructure/dev/`):
 - Creates single-node Kind cluster (control-plane only)
 - Installs ArgoCD automatically (insecure mode)
-- Port mappings: 30080 (ArgoCD), 30001 (frontend via NodePort → host 3000)
+- Installs Istio with Gateway hostname: `dev.cuddly-disco.ai.localhost`
+- Port mappings: 30001 (Gateway API → host 3000)
 
 **Prod Environment** (`infrastructure/prod/`):
 - Creates multi-node Kind cluster (1 control-plane + 2 workers)
 - Installs ArgoCD automatically (TLS enabled)
-- Port mappings: 30080 (ArgoCD), 30001 (frontend via NodePort → host 3000)
+- Installs Istio with Gateway hostname: `cuddly-disco.ai.localhost`
+- Port mappings: 30080 (ArgoCD), 30001 (Gateway API → host 3000)
 - Production-ready configuration for local testing
 
 **Terraform Commands:**
@@ -294,8 +302,10 @@ The frontend is deployed using a Helm chart for better configurability and reusa
   - `image.tag: v1.0.0` - Semantic version tag
   - `config.location` - Location displayed in app
   - `config.backendUrl` - Backend service URL (internal Kubernetes DNS)
-  - `service.type: NodePort` - Service type with nodePort 30001
+  - `service.type: ClusterIP` - Internal service (accessed via Gateway)
   - `service.port: 3000` - Next.js server port
+  - `gateway.hostname` - Hostname for HTTPRoute (environment-specific)
+  - `gateway.name` - Gateway resource name in istio-system
   - Resource limits and requests
   - **Health probe configurations:**
     - `startupProbe` - 60s grace period for initial startup (prevents CrashLoopBackOff)
@@ -306,7 +316,8 @@ The frontend is deployed using a Helm chart for better configurability and reusa
   - `namespace.yaml` - Creates cuddly-disco-frontend namespace
   - `configmap.yaml` - Environment variables ConfigMap (LOCATION, BACKEND_URL)
   - `deployment.yaml` - Deployment with 2 replicas, health probes at `/api/health`
-  - `service.yaml` - NodePort service on port 30001 → container port 3000
+  - `service.yaml` - ClusterIP service on port 3000
+  - `httproute.yaml` - Gateway API HTTPRoute for external access
 
 **Key Helm Features:**
 - Configurable via `values.yaml` or command-line overrides
@@ -342,22 +353,29 @@ The backend API is deployed using a Helm chart with internal-only access.
 - No external exposure for security - users cannot directly access the backend API
 
 **Frontend-Backend Connectivity:**
-The architecture uses Next.js Server-Side Rendering for direct server-to-server communication:
-1. User's browser requests a page from frontend pod (NodePort 30001)
-2. Next.js Server Component executes on the server before rendering
-3. Server Component makes direct API call to `http://backend-service.cuddly-disco-backend.svc.cluster.local:5000/api/message`
-4. Backend responds to Next.js server (server-to-server, not exposed to browser)
-5. Next.js server renders the page with backend data and sends complete HTML to browser
-6. Backend service remains ClusterIP - inaccessible from outside the cluster
-7. No client-side API calls or loading states - everything is pre-rendered
+The architecture uses Kubernetes Gateway API for external access and Next.js SSR for backend communication:
+1. User's browser requests `http://dev.cuddly-disco.ai.localhost:3000` (or prod hostname)
+2. Request hits Gateway API gateway (NodePort 30001 mapped to host port 3000)
+3. HTTPRoute routes request to frontend ClusterIP service on port 3000
+4. Next.js Server Component executes on the server before rendering
+5. Server Component makes direct API call to `http://backend-service.cuddly-disco-backend.svc.cluster.local:5000/api/message`
+6. Backend responds to Next.js server (server-to-server, not exposed to browser)
+7. Next.js server renders the page with backend data and sends complete HTML to browser
+8. Backend service remains ClusterIP - inaccessible from outside the cluster
+9. No client-side API calls or loading states - everything is pre-rendered
 
 **ArgoCD Applications** (`k8s/argocd-apps/`):
-- `frontend-app.yaml` - Frontend ArgoCD Application
+- `frontend-app.yaml` - Frontend ArgoCD Application for **prod** environment
   - Source: GitHub repository, main branch, path: k8s/frontend
-  - Helm: Uses values.yaml from chart, supports value overrides
+  - Helm: Uses values.yaml from chart (hostname: cuddly-disco.ai.localhost)
   - Destination: cuddly-disco-frontend namespace
   - Sync policy: Automated with prune and selfHeal enabled
-- `backend-app.yaml` - Backend ArgoCD Application
+- `frontend-app-dev.yaml` - Frontend ArgoCD Application for **dev** environment
+  - Source: GitHub repository, main branch, path: k8s/frontend
+  - Helm: Overrides gateway.hostname to dev.cuddly-disco.ai.localhost
+  - Destination: cuddly-disco-frontend namespace
+  - Sync policy: Automated with prune and selfHeal enabled
+- `backend-app.yaml` - Backend ArgoCD Application (same for all environments)
   - Source: GitHub repository, main branch, path: k8s/backend
   - Helm: Uses values.yaml from chart, supports value overrides
   - Destination: cuddly-disco-backend namespace
@@ -365,29 +383,45 @@ The architecture uses Next.js Server-Side Rendering for direct server-to-server 
 
 ### GitOps Workflow
 
-**Initial Setup:**
+**Initial Setup (Dev Environment):**
 ```bash
-# 1. Create cluster and install ArgoCD
+# 1. Create cluster, install ArgoCD and Istio
 cd infrastructure/dev && terraform apply
 
 # 2. Configure kubectl
 export KUBECONFIG=~/.kube/kind-kind-dev
 kubectl get nodes
 
-# 3. Deploy both frontend and backend applications via ArgoCD
-kubectl apply -f k8s/argocd-apps/backend-app.yaml
-kubectl apply -f k8s/argocd-apps/frontend-app.yaml
+# 3. Verify Gateway is ready
+kubectl get gateway -n istio-system
+kubectl get pods -n istio-system
 
-# 4. Watch ArgoCD sync
+# 4. Deploy both frontend and backend applications via ArgoCD
+kubectl apply -f k8s/argocd-apps/backend-app.yaml
+kubectl apply -f k8s/argocd-apps/frontend-app-dev.yaml  # Use dev-specific file
+
+# 5. Watch ArgoCD sync
 kubectl get applications -n argocd
 # Or use ArgoCD UI: http://localhost:30080
 
-# 5. Verify deployments
+# 6. Verify deployments
 kubectl get pods -n cuddly-disco-backend
 kubectl get pods -n cuddly-disco-frontend
+kubectl get httproute -n cuddly-disco-frontend
 
-# 6. Access frontend
-open http://localhost:3000
+# 7. Access frontend via Gateway
+curl -H "Host: dev.cuddly-disco.ai.localhost" http://localhost:3000
+# Or configure /etc/hosts and use: http://dev.cuddly-disco.ai.localhost:3000
+```
+
+**Initial Setup (Prod Environment):**
+```bash
+# Use infrastructure/prod instead and frontend-app.yaml (without -dev suffix)
+cd infrastructure/prod && terraform apply
+export KUBECONFIG=~/.kube/kind-kind-prod
+kubectl apply -f k8s/argocd-apps/backend-app.yaml
+kubectl apply -f k8s/argocd-apps/frontend-app.yaml  # Prod version
+curl -H "Host: cuddly-disco.ai.localhost" http://localhost:3000
 ```
 
 **Development Workflow:**
@@ -439,8 +473,14 @@ kubectl patch application frontend -n argocd \
 ### Accessing Services
 
 **Frontend:**
-- **Local:** http://localhost:3000 (NodePort 30001 → host 3000)
-- **In-cluster:** `http://frontend-service.cuddly-disco-frontend.svc.cluster.local`
+- **Local (Dev):** http://localhost:3000 with Host header `dev.cuddly-disco.ai.localhost`
+  - Via curl: `curl -H "Host: dev.cuddly-disco.ai.localhost" http://localhost:3000`
+  - Via browser: Add `127.0.0.1 dev.cuddly-disco.ai.localhost` to `/etc/hosts`, then visit `http://dev.cuddly-disco.ai.localhost:3000`
+- **Local (Prod):** http://localhost:3000 with Host header `cuddly-disco.ai.localhost`
+  - Via curl: `curl -H "Host: cuddly-disco.ai.localhost" http://localhost:3000`
+  - Via browser: Add `127.0.0.1 cuddly-disco.ai.localhost` to `/etc/hosts`, then visit `http://cuddly-disco.ai.localhost:3000`
+- **In-cluster:** `http://frontend-service.cuddly-disco-frontend.svc.cluster.local:3000`
+- **Architecture:** Gateway API (NodePort 30001 → host 3000) → HTTPRoute → ClusterIP Service
 
 **Backend:**
 - **Local:** Not exposed (ClusterIP only)
@@ -456,19 +496,35 @@ kubectl patch application frontend -n argocd \
 - **Username:** `admin`
 - **Password:** `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`
 
+**Istio Gateway:**
+- **Service:** `kubectl get svc -n istio-system istio-ingressgateway`
+- **Gateway Resource:** `kubectl get gateway -n istio-system cuddly-disco-gateway`
+- **Status:** `kubectl describe gateway -n istio-system cuddly-disco-gateway`
+
 **Troubleshooting:**
 ```bash
 # Check pod status
 kubectl get pods -n cuddly-disco-frontend
 kubectl get pods -n cuddly-disco-backend
+kubectl get pods -n istio-system
 
 # View pod logs
 kubectl logs -n cuddly-disco-frontend -l app=frontend
 kubectl logs -n cuddly-disco-backend -l app=backend
+kubectl logs -n istio-system -l app=istio-ingressgateway
 
 # Describe pod for events
 kubectl describe pod -n cuddly-disco-frontend <pod-name>
 kubectl describe pod -n cuddly-disco-backend <pod-name>
+
+# Check Gateway API resources
+kubectl get gateway -n istio-system
+kubectl get httproute -n cuddly-disco-frontend
+kubectl describe gateway -n istio-system cuddly-disco-gateway
+kubectl describe httproute -n cuddly-disco-frontend
+
+# Check Gateway status (Accepted, Programmed, Ready)
+kubectl get gateway -n istio-system cuddly-disco-gateway -o jsonpath='{.status.conditions[*].type}'
 
 # Check ArgoCD app status
 kubectl get application frontend -n argocd -o yaml
@@ -478,27 +534,49 @@ kubectl get application backend -n argocd -o yaml
 argocd app sync frontend --force
 argocd app sync backend --force
 
+# Test Gateway directly
+curl -v -H "Host: dev.cuddly-disco.ai.localhost" http://localhost:3000
+
 # Test backend connectivity from frontend pod
 kubectl exec -it -n cuddly-disco-frontend <frontend-pod> -- sh
 # Inside pod: curl http://backend-service.cuddly-disco-backend.svc.cluster.local:5000/health
+
+# Check Istio gateway service
+kubectl get svc -n istio-system istio-ingressgateway
+kubectl describe svc -n istio-system istio-ingressgateway
 ```
 
 ### Key Kubernetes Concepts
 
 **Namespaces:**
 - `argocd` - ArgoCD installation
+- `istio-system` - Istio control plane and Gateway resources
 - `cuddly-disco-frontend` - Frontend application
 - `cuddly-disco-backend` - Backend API
 
 **Service Types:**
-- **NodePort:** Exposes service on static port on each node (30000-32767 range)
-  - Frontend uses NodePort 30001
-  - Kind maps NodePort to host via extra_port_mappings
-  - Accessible from outside the cluster
 - **ClusterIP:** Internal-only service (default)
-  - Backend uses ClusterIP on port 5000
-  - Only accessible from within the cluster
-  - Not exposed to external traffic
+  - Frontend service: ClusterIP on port 3000 (accessed via Gateway)
+  - Backend service: ClusterIP on port 5000 (internal only)
+  - Not accessible from outside the cluster
+- **NodePort:** Exposes service on static port on each node (30000-32767 range)
+  - Istio Gateway uses NodePort 30090 for external access
+  - Kind maps NodePort to host via extra_port_mappings
+  - ArgoCD uses NodePort 30080
+
+**Gateway API Concepts:**
+- **Gateway:** Infrastructure-level ingress resource in istio-system namespace
+  - Defines listeners (protocol, port, hostname)
+  - Managed by Istio gateway controller
+  - Status conditions: Accepted, Programmed, Ready
+- **HTTPRoute:** Application-level routing resource in frontend namespace
+  - References Gateway via parentRefs (cross-namespace)
+  - Defines hostname matching rules
+  - Routes traffic to ClusterIP services
+  - More expressive than Ingress API
+- **GatewayClass:** Cluster-level resource defining controller
+  - `istio` GatewayClass created by Istio installation
+  - Multiple Gateway instances can reference same GatewayClass
 
 **GitOps Benefits:**
 - **Declarative:** Desired state in Git
