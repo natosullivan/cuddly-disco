@@ -115,10 +115,10 @@ resource "null_resource" "gateway" {
   }
 }
 
-# Patch the Gateway service to use NodePort 30001
+# Patch the Gateway service to use NodePort 30001 on the HTTP port (port 80)
 resource "null_resource" "gateway_nodeport_patch" {
   provisioner "local-exec" {
-    command = "sleep 15 && kubectl patch service ${var.gateway_name}-istio -n ${var.namespace} --type=json -p='[{\"op\":\"replace\",\"path\":\"/spec/ports/0/nodePort\",\"value\":30001}]'"
+    command = "sleep 15 && kubectl patch service ${var.gateway_name}-istio -n ${var.namespace} --type=json -p='[{\"op\":\"replace\",\"path\":\"/spec/ports/1/nodePort\",\"value\":30001}]'"
     environment = {
       KUBECONFIG = var.kubeconfig_path
     }
