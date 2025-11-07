@@ -2,5 +2,5 @@
 .current-feature.json
 
 # Optional: Uncomment to ignore all feature files if you want to keep prompts private
-# *.json
+*.json
 # !.gitignore
