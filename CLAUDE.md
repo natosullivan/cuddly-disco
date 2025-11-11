@@ -168,6 +168,7 @@ The project uses GitHub Actions for continuous integration and deployment:
   4. `container-tests`: Loads images and runs integration tests (depends on all tests + build)
   5. `semantic-release`: Creates version tags and releases (main branch only, depends on all tests)
   6. `publish-images`: Publishes to GitHub Container Registry (depends on semantic-release)
+  7. `update-helm-charts`: Updates Helm chart versions in Git (depends on semantic-release + publish-images)
 
 ### Job Dependencies
 The pipeline ensures quality gates:
@@ -175,6 +176,7 @@ The pipeline ensures quality gates:
 - **If any test fails, the pipeline stops and no images are published**
 - `semantic-release` runs only on main branch after all tests pass
 - `publish-images` runs only if a new release was created
+- `update-helm-charts` runs only if images were successfully published
 
 ### Container Build Job
 The `build-containers` job creates reusable Docker images:
@@ -234,10 +236,31 @@ The `publish-images` job publishes to GitHub Container Registry:
 - **Permissions:** Requires `packages: write` permission
 - **Version Sync:** Image versions exactly match Git tags created by semantic-release
 
+### Helm Chart Version Updates
+The `update-helm-charts` job automatically updates Helm chart version tags in Git:
+- **Runs Only If:** Images were successfully published to registry
+- **Process:**
+  1. Uses `sed` to update `k8s/frontend/values.yaml` → `image.tag` with new version
+  2. Uses `sed` to update `k8s/backend/values.yaml` → `image.tag` with new version
+  3. Commits changes with message: `chore: Update Helm chart versions to VERSION [skip ci]`
+  4. Pushes commit to main branch
+- **Bot Token:** Uses `BOT_GITHUB_TOKEN` secret (PAT) instead of `GITHUB_TOKEN`
+  - This allows the commit to trigger ArgoCD webhooks
+  - `GITHUB_TOKEN` won't trigger webhooks (GitHub prevents recursive workflows)
+- **Skip CI:** Commit message includes `[skip ci]` to prevent infinite loops
+- **GitOps Integration:** ArgoCD detects the Git change and automatically syncs new versions to Kubernetes
+
+**Setting up the Bot Token:**
+1. Create a GitHub Personal Access Token (PAT) with `repo` scope
+2. Add it as a repository secret named `BOT_GITHUB_TOKEN`
+3. The token enables the version bump commit to trigger ArgoCD's Git polling/webhooks
+
 This architecture ensures:
 - Docker containers are tested before deployment
-- Version numbers are consistent across Git tags and Docker images
+- Version numbers are consistent across Git tags, Docker images, and Helm charts
 - Images are only published after all tests pass
+- Helm charts are automatically updated when new versions are released
+- ArgoCD can automatically deploy new versions via GitOps
 - No manual version management required
 
 ## Kubernetes and GitOps Deployment
@@ -266,17 +289,22 @@ The project supports deployment to Kubernetes using ArgoCD for GitOps-based cont
 - Creates single-node Kind cluster (control-plane only)
 - Installs ArgoCD automatically (insecure mode)
 - Installs Istio with Gateway hostname: `dev.cuddly-disco.ai.localhost`
-- Port mappings: 30001 (Gateway API → host 3000)
+- Port mappings:
+  - ArgoCD UI: NodePort 30080 → host 30080
+  - Gateway API: NodePort 30001 → host 3000
 
 **Prod Environment** (`infrastructure/prod/`):
 - Creates multi-node Kind cluster (1 control-plane + 2 workers)
 - Installs ArgoCD automatically (TLS enabled)
 - Installs Istio with Gateway hostname: `cuddly-disco.ai.localhost`
-- Port mappings: 30080 (ArgoCD), 30001 (Gateway API → host 3000)
+- Port mappings (different from dev to avoid conflicts):
+  - ArgoCD UI: NodePort 30080 → host 30081
+  - Gateway API: NodePort 30001 → host 3001
 - Production-ready configuration for local testing
 
 **Terraform Commands:**
 ```bash
+# Dev environment
 cd infrastructure/dev
 terraform init
 terraform plan
@@ -287,6 +315,15 @@ eval $(terraform output -raw argocd_admin_password_command)
 
 # Access ArgoCD UI
 open http://localhost:30080  # Login: admin/<password>
+
+# Prod environment
+cd infrastructure/prod
+terraform init
+terraform plan
+terraform apply
+
+# Access ArgoCD UI (prod)
+open http://localhost:30081  # Login: admin/<password>
 ```
 
 ### Kubernetes Manifests
@@ -354,8 +391,8 @@ The backend API is deployed using a Helm chart with internal-only access.
 
 **Frontend-Backend Connectivity:**
 The architecture uses Kubernetes Gateway API for external access and Next.js SSR for backend communication:
-1. User's browser requests `http://dev.cuddly-disco.ai.localhost:3000` (or prod hostname)
-2. Request hits Gateway API gateway (NodePort 30001 mapped to host port 3000)
+1. User's browser requests `http://dev.cuddly-disco.ai.localhost:3000` (dev) or `http://cuddly-disco.ai.localhost:3001` (prod)
+2. Request hits Gateway API gateway (NodePort 30001 mapped to host port 3000 for dev, 3001 for prod)
 3. HTTPRoute routes request to frontend ClusterIP service on port 3000
 4. Next.js Server Component executes on the server before rendering
 5. Server Component makes direct API call to `http://backend-service.cuddly-disco-backend.svc.cluster.local:5000/api/message`
@@ -421,7 +458,7 @@ cd infrastructure/prod && terraform apply
 export KUBECONFIG=~/.kube/kind-kind-prod
 kubectl apply -f k8s/argocd-apps/backend-app.yaml
 kubectl apply -f k8s/argocd-apps/frontend-app.yaml  # Prod version
-curl -H "Host: cuddly-disco.ai.localhost" http://localhost:3000
+curl -H "Host: cuddly-disco.ai.localhost" http://localhost:3001  # Note: port 3001 for prod
 ```
 
 **Development Workflow:**
@@ -476,11 +513,13 @@ kubectl patch application frontend -n argocd \
 - **Local (Dev):** http://localhost:3000 with Host header `dev.cuddly-disco.ai.localhost`
   - Via curl: `curl -H "Host: dev.cuddly-disco.ai.localhost" http://localhost:3000`
   - Via browser: Add `127.0.0.1 dev.cuddly-disco.ai.localhost` to `/etc/hosts`, then visit `http://dev.cuddly-disco.ai.localhost:3000`
-- **Local (Prod):** http://localhost:3000 with Host header `cuddly-disco.ai.localhost`
-  - Via curl: `curl -H "Host: cuddly-disco.ai.localhost" http://localhost:3000`
-  - Via browser: Add `127.0.0.1 cuddly-disco.ai.localhost` to `/etc/hosts`, then visit `http://cuddly-disco.ai.localhost:3000`
+- **Local (Prod):** http://localhost:3001 with Host header `cuddly-disco.ai.localhost`
+  - Via curl: `curl -H "Host: cuddly-disco.ai.localhost" http://localhost:3001`
+  - Via browser: Add `127.0.0.1 cuddly-disco.ai.localhost` to `/etc/hosts`, then visit `http://cuddly-disco.ai.localhost:3001`
 - **In-cluster:** `http://frontend-service.cuddly-disco-frontend.svc.cluster.local:3000`
-- **Architecture:** Gateway API (NodePort 30001 → host 3000) → HTTPRoute → ClusterIP Service
+- **Architecture:**
+  - Dev: Gateway API (NodePort 30001 → host 3000) → HTTPRoute → ClusterIP Service
+  - Prod: Gateway API (NodePort 30001 → host 3001) → HTTPRoute → ClusterIP Service
 
 **Backend:**
 - **Local:** Not exposed (ClusterIP only)
@@ -492,7 +531,8 @@ kubectl patch application frontend -n argocd \
   ```
 
 **ArgoCD:**
-- **UI:** http://localhost:30080 (NodePort)
+- **UI (Dev):** http://localhost:30080 (NodePort)
+- **UI (Prod):** http://localhost:30081 (NodePort)
 - **Username:** `admin`
 - **Password:** `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`
 
@@ -535,7 +575,8 @@ argocd app sync frontend --force
 argocd app sync backend --force
 
 # Test Gateway directly
-curl -v -H "Host: dev.cuddly-disco.ai.localhost" http://localhost:3000
+curl -v -H "Host: dev.cuddly-disco.ai.localhost" http://localhost:3000      # Dev
+curl -v -H "Host: cuddly-disco.ai.localhost" http://localhost:3001          # Prod
 
 # Test backend connectivity from frontend pod
 kubectl exec -it -n cuddly-disco-frontend <frontend-pod> -- sh
@@ -560,9 +601,9 @@ kubectl describe svc -n istio-system istio-ingressgateway
   - Backend service: ClusterIP on port 5000 (internal only)
   - Not accessible from outside the cluster
 - **NodePort:** Exposes service on static port on each node (30000-32767 range)
-  - Istio Gateway uses NodePort 30090 for external access
-  - Kind maps NodePort to host via extra_port_mappings
-  - ArgoCD uses NodePort 30080
+  - Istio Gateway uses NodePort 30001 for external access
+  - Kind maps NodePort to host via extra_port_mappings (dev: 3000, prod: 3001)
+  - ArgoCD uses NodePort 30080 mapped to host (dev: 30080, prod: 30081)
 
 **Gateway API Concepts:**
 - **Gateway:** Infrastructure-level ingress resource in istio-system namespace

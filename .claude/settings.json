@@ -1,8 +1,14 @@
 {
   "hooks": {
-    "user-prompt-submit": {
-      "command": "bash scripts/track-prompt.sh \"{{PROMPT}}\"",
-      "description": "Automatically capture prompts for blog post tracking"
-    }
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_PROJECT_DIR/scripts/track-prompt.sh \"$(jq -r '.prompt')\""
+          }
+        ]
+      }
+    ]
   }
 }

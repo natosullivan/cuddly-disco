@@ -297,3 +297,53 @@ jobs:
           # Push both tags
           docker push ${REGISTRY}/${IMAGE_NAME}/frontend:${VERSION}
           docker push ${REGISTRY}/${IMAGE_NAME}/frontend:latest
+
+  update-helm-charts:
+    name: Update Helm Chart Versions
+    runs-on: ubuntu-latest
+    needs: [semantic-release, publish-images]
+    # Only run if a release was created AND images were published
+    if: needs.semantic-release.outputs.released == 'true' && github.repository == 'natosullivan/cuddly-disco'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Use a PAT to allow the commit to trigger ArgoCD webhooks
+          # GITHUB_TOKEN won't trigger webhooks to prevent recursive workflows
+          token: ${{ secrets.BOT_GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Update Helm chart versions
+        env:
+          VERSION: ${{ needs.semantic-release.outputs.version }}
+        run: |
+          # Update frontend values.yaml
+          sed -i 's/tag: "[^"]*"/tag: "'"${VERSION}"'"/' k8s/frontend/values.yaml
+
+          # Update backend values.yaml
+          sed -i 's/tag: "[^"]*"/tag: "'"${VERSION}"'"/' k8s/backend/values.yaml
+
+          echo "✅ Updated Helm charts to version ${VERSION}"
+
+      - name: Commit and push changes
+        env:
+          VERSION: ${{ needs.semantic-release.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add k8s/frontend/values.yaml k8s/backend/values.yaml
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: Update Helm chart versions to ${VERSION} [skip ci]"
+          git push origin main
+
+          echo "✅ Pushed Helm chart version updates to main branch"
