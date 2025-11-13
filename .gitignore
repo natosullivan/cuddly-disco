@@ -60,3 +60,6 @@ htmlcov/
 **/*_override.tf.json
 .terraformrc
 terraform.rc
+
+# Terraform-generated Gateway manifests (dynamically created by Istio module)
+infrastructure/modules/istio/gateway-*.yaml
