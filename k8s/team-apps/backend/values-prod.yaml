@@ -1,0 +1,13 @@
+# Prod environment overrides for backend
+
+# Replicas for prod
+replicaCount: 1
+
+# Higher resource limits for prod
+resources:
+  limits:
+    cpu: 400m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

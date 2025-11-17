@@ -1,0 +1,56 @@
+# Base values for backend application
+
+# Team identification
+teamName: backend
+
+# Namespace configuration
+namespace:
+  name: backend
+  create: true
+
+# Container image
+image:
+  repository: ghcr.io/natosullivan/cuddly-disco/backend
+  tag: v1.1.1
+  pullPolicy: IfNotPresent
+
+# Number of replicas (overridden per environment)
+replicaCount: 1
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 5000
+  name: backend-service
+
+# Gateway configuration (backend is internal only)
+gateway:
+  enabled: false
+
+# Resource limits (overridden per environment)
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# Health probes
+healthProbes:
+  liveness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  readiness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 5
+  startup:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 12

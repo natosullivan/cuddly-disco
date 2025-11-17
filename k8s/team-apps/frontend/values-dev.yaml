@@ -1,0 +1,21 @@
+# Dev environment overrides for frontend
+
+# Fewer replicas for dev
+replicaCount: 1
+
+# Dev gateway hostname
+gateway:
+  hostname: dev.cuddly-disco.ai.localhost
+
+# Dev-specific configuration
+config:
+  location: "Development"
+
+# Lower resource limits for dev
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi

@@ -33,3 +33,21 @@ output "argocd_namespace" {
   description = "Namespace where ArgoCD is installed"
   value       = module.argocd.namespace
 }
+
+output "client_certificate" {
+  description = "Client certificate for cluster authentication"
+  value       = module.k8s.client_certificate
+  sensitive   = true
+}
+
+output "client_key" {
+  description = "Client key for cluster authentication"
+  value       = module.k8s.client_key
+  sensitive   = true
+}
+
+output "cluster_ca_certificate" {
+  description = "Cluster CA certificate"
+  value       = module.k8s.cluster_ca_certificate
+  sensitive   = true
+}

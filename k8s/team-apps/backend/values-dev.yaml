@@ -1,0 +1,13 @@
+# Dev environment overrides for backend
+
+# Fewer replicas for dev
+replicaCount: 1
+
+# Lower resource limits for dev
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi

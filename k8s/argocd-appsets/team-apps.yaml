@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: team-apps
+  namespace: argocd
+spec:
+  # Use matrix generator to combine Git directories (teams) × environments (dev/prod)
+  generators:
+  - matrix:
+      generators:
+      # Generator 1: Discover team apps from Git directories
+      - git:
+          repoURL: https://github.com/natosullivan/cuddly-disco.git
+          revision: HEAD
+          directories:
+          - path: k8s/team-apps/*
+
+      # Generator 2: Define target environments (dev and prod clusters)
+      - list:
+          elements:
+          - cluster: kind-dev
+            environment: dev
+            server: https://kind-dev-control-plane:6443
+            valuesFile: values-dev.yaml
+          - cluster: kind-prod
+            environment: prod
+            server: https://kind-prod-control-plane:6443
+            valuesFile: values-prod.yaml
+
+  # Template to generate Applications for each team × environment combination
+  template:
+    metadata:
+      name: '{{path.basename}}-{{environment}}'
+      labels:
+        team: '{{path.basename}}'
+        environment: '{{environment}}'
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/natosullivan/cuddly-disco.git
+        # Use targetRevision from config.yaml or default to HEAD
+        targetRevision: HEAD
+        path: '{{path}}'
+        helm:
+          valueFiles:
+          - values.yaml
+          - '{{valuesFile}}'
+
+      destination:
+        server: '{{server}}'
+        namespace: '{{path.basename}}'
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m

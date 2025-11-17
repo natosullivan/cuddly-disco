@@ -1,0 +1,21 @@
+# Prod environment overrides for frontend
+
+# Replicas for prod
+replicaCount: 1
+
+# Prod gateway hostname
+gateway:
+  hostname: cuddly-disco.ai.localhost
+
+# Prod-specific configuration
+config:
+  location: "Sydney"
+
+# Higher resource limits for prod
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

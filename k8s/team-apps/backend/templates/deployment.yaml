@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "backend-app.fullname" . }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "backend-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "backend-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "backend-app.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: {{ .Values.teamName }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.service.port }}
+          protocol: TCP
+        {{- if .Values.healthProbes.liveness.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.healthProbes.liveness.path }}
+            port: http
+          initialDelaySeconds: {{ .Values.healthProbes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthProbes.liveness.periodSeconds }}
+        {{- end }}
+        {{- if .Values.healthProbes.readiness.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.healthProbes.readiness.path }}
+            port: http
+          initialDelaySeconds: {{ .Values.healthProbes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthProbes.readiness.periodSeconds }}
+        {{- end }}
+        {{- if .Values.healthProbes.startup.enabled }}
+        startupProbe:
+          httpGet:
+            path: {{ .Values.healthProbes.startup.path }}
+            port: http
+          initialDelaySeconds: {{ .Values.healthProbes.startup.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthProbes.startup.periodSeconds }}
+          failureThreshold: {{ .Values.healthProbes.startup.failureThreshold }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}

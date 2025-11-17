@@ -1,0 +1,65 @@
+# Base values for frontend application
+
+# Team identification
+teamName: frontend
+routePath: /
+
+# Namespace configuration
+namespace:
+  name: frontend
+  create: true
+
+# Container image
+image:
+  repository: ghcr.io/natosullivan/cuddly-disco/frontend
+  tag: v1.1.1
+  pullPolicy: IfNotPresent
+
+# Number of replicas (overridden per environment)
+replicaCount: 1
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 3000
+  name: frontend-service
+
+# Gateway configuration
+gateway:
+  enabled: true
+  name: cuddly-disco-gateway
+  namespace: istio-system
+  hostname: cuddly-disco.ai.localhost
+
+# Application configuration (environment variables)
+config:
+  location: "Sydney"
+  backendUrl: "http://backend-service.backend.svc.cluster.local:5000"
+
+# Resource limits (overridden per environment)
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# Health probes
+healthProbes:
+  liveness:
+    enabled: true
+    path: /api/health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  readiness:
+    enabled: true
+    path: /api/health
+    initialDelaySeconds: 5
+    periodSeconds: 5
+  startup:
+    enabled: true
+    path: /api/health
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 12

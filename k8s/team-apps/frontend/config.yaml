@@ -1,0 +1,9 @@
+team:
+  name: frontend
+  namespace: frontend
+  routePath: /
+  owner: "platform-team@example.com"
+  slackChannel: "#frontend-alerts"
+  version:
+    dev: main      # Dev uses latest from main branch
+    prod: v1.1.1   # Prod uses specific Git tag

@@ -1,0 +1,9 @@
+team:
+  name: backend
+  namespace: backend
+  routePath: null  # Backend is internal only, no HTTPRoute
+  owner: "platform-team@example.com"
+  slackChannel: "#backend-alerts"
+  version:
+    dev: main      # Dev uses latest from main branch
+    prod: v1.1.1   # Prod uses specific Git tag

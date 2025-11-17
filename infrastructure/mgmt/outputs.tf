@@ -17,3 +17,11 @@ output "argocd_ui_url" {
   description = "URL to access ArgoCD UI"
   value       = "http://localhost:30082"
 }
+
+output "registered_clusters" {
+  description = "List of clusters registered with ArgoCD"
+  value = concat(
+    module.register_dev_cluster[*].cluster_name,
+    module.register_prod_cluster[*].cluster_name
+  )
+}
