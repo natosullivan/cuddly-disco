@@ -21,7 +21,7 @@ output "argocd_ui_url" {
 output "registered_clusters" {
   description = "List of clusters registered with ArgoCD"
   value = concat(
-    module.register_dev_cluster[*].cluster_name,
-    module.register_prod_cluster[*].cluster_name
+    argocd_cluster.dev[*].name,
+    argocd_cluster.prod[*].name
   )
 }

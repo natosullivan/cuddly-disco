@@ -9,8 +9,13 @@ output "cluster_name" {
 }
 
 output "cluster_endpoint" {
-  description = "Kubernetes API server endpoint"
+  description = "Kubernetes API server endpoint (external/localhost)"
   value       = module.k8s.cluster_endpoint
+}
+
+output "cluster_endpoint_internal" {
+  description = "Kubernetes API server endpoint (internal/Docker network)"
+  value       = "https://${module.k8s.cluster_name}-control-plane:6443"
 }
 
 output "kubeconfig" {

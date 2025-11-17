@@ -625,3 +625,425 @@ kubectl describe svc -n istio-system istio-ingressgateway
 - **Automated:** Changes trigger deployments
 - **Rollback-friendly:** Git revert = application rollback
 - **Consistent:** Same process across environments
+
+## Multi-Cluster Deployment with ApplicationSets
+
+The project uses a **hub-spoke architecture** where a management cluster deploys applications to both dev and prod clusters using ArgoCD ApplicationSets.
+
+### Architecture Overview
+
+```
+Management Cluster (kind-mgmt)
+├── ArgoCD (central control plane)
+├── Cluster Secrets (credentials for dev/prod)
+└── ApplicationSets (define deployment patterns)
+    ├── Team Apps ApplicationSet
+    └── Auto-generates Applications for each team × environment
+        ├── team-a-dev → kind-dev cluster
+        ├── team-a-prod → kind-prod cluster
+        ├── team-b-dev → kind-dev cluster
+        └── team-b-prod → kind-prod cluster
+```
+
+**Key Components:**
+
+1. **Management Cluster (`kind-mgmt`):**
+   - Runs ArgoCD with ApplicationSet controller
+   - Registers dev and prod clusters via Terraform
+   - Hosts ApplicationSet definitions
+   - UI: http://localhost:30082
+
+2. **Dev Cluster (`kind-dev`):**
+   - Hosts dev environments for all teams
+   - Gateway: `dev.cuddly-disco.ai.localhost:3000`
+   - Lower resource limits, 1 replica per app
+
+3. **Prod Cluster (`kind-prod`):**
+   - Hosts production environments for all teams
+   - Gateway: `cuddly-disco.ai.localhost:3001`
+   - Higher resource limits, 3 replicas per app
+
+### Cluster Registration
+
+**ArgoCD Terraform Provider** (`infrastructure/mgmt/`)
+
+The management cluster uses the official ArgoCD Terraform provider to register dev and prod clusters. This approach uses the provider's native `argocd_cluster` resource for proper cluster registration.
+
+**Provider Configuration** (`infrastructure/mgmt/versions.tf` and `provider.tf`):
+```hcl
+# versions.tf
+terraform {
+  required_providers {
+    argocd = {
+      source  = "argoproj-labs/argocd"
+      version = "~> 7.0"
+    }
+  }
+}
+
+# provider.tf
+provider "argocd" {
+  username = "admin"
+  password = data.kubernetes_secret.argocd_admin.data["password"]
+
+  port_forward_with_namespace = "argocd"
+  insecure                   = true
+  plain_text                  = true
+  grpc_web                    = true
+
+  kubernetes {
+    host                   = module.k8s.cluster_endpoint
+    cluster_ca_certificate = module.k8s.cluster_ca_certificate
+    client_certificate     = module.k8s.client_certificate
+    client_key             = module.k8s.client_key
+  }
+}
+```
+
+**Cluster Registration** (`infrastructure/mgmt/clusters.tf`):
+```hcl
+resource "argocd_cluster" "dev" {
+  server = data.terraform_remote_state.dev.outputs.cluster_endpoint_internal
+  name   = data.terraform_remote_state.dev.outputs.cluster_name
+
+  config {
+    tls_client_config {
+      ca_data   = data.terraform_remote_state.dev.outputs.cluster_ca_certificate
+      cert_data = data.terraform_remote_state.dev.outputs.client_certificate
+      key_data  = data.terraform_remote_state.dev.outputs.client_key
+    }
+  }
+
+  depends_on = [module.argocd]
+}
+```
+
+**Key Points:**
+- **Internal Endpoints**: Uses Docker network hostnames (`https://kind-dev-control-plane:6443`) instead of localhost addresses, allowing ArgoCD pods to reach target clusters
+- **Port Forwarding**: Provider uses `port_forward_with_namespace` to connect to ArgoCD API running in the cluster
+- **Automatic Authentication**: Provider authenticates using admin credentials from Kubernetes secret
+- **Proper Secret Format**: Provider creates cluster secrets in the correct ArgoCD format automatically
+
+**Cluster Endpoint Outputs** (added to `infrastructure/dev/outputs.tf` and `infrastructure/prod/outputs.tf`):
+```hcl
+output "cluster_endpoint" {
+  description = "Kubernetes API server endpoint (external/localhost)"
+  value       = module.k8s.cluster_endpoint
+}
+
+output "cluster_endpoint_internal" {
+  description = "Kubernetes API server endpoint (internal/Docker network)"
+  value       = "https://${module.k8s.cluster_name}-control-plane:6443"
+}
+```
+
+**Setup:**
+```bash
+# 1. Create all clusters
+cd infrastructure/dev && terraform apply
+cd ../prod && terraform apply
+cd ../mgmt && terraform init -upgrade  # Install ArgoCD provider
+cd ../mgmt && KUBECONFIG=~/.kube/kind-kind-mgmt terraform apply
+
+# 2. Verify cluster registration
+export KUBECONFIG=~/.kube/kind-kind-mgmt
+kubectl get secrets -n argocd -l argocd.argoproj.io/secret-type=cluster
+# Expected output:
+# cluster-kind-dev-control-plane-...
+# cluster-kind-prod-control-plane-...
+
+# 3. View registered clusters in ArgoCD UI
+open http://localhost:30082
+# Login: admin/<password from terraform output>
+# Navigate to Settings → Clusters
+```
+
+**Why This Approach:**
+- **Official Provider**: Uses the maintained `argoproj-labs/argocd` provider
+- **Correct Format**: Automatically creates properly formatted cluster secrets
+- **Type Safety**: Terraform validates configuration at plan time
+- **Idempotent**: Can be re-applied safely without manual cleanup
+- **GitOps-Ready**: Cluster registration is declarative and version-controlled
+
+### Team Applications with ApplicationSets
+
+**Directory:** `k8s/team-apps/`
+
+Teams are deployed using the **Git directory generator** pattern, which automatically discovers team apps from Git directories.
+
+**ApplicationSet Definition:** `k8s/argocd-appsets/team-apps.yaml`
+
+```yaml
+generators:
+- matrix:
+    generators:
+    # Discover teams from Git directories
+    - git:
+        repoURL: https://github.com/natosullivan/cuddly-disco.git
+        revision: HEAD
+        directories:
+        - path: k8s/team-apps/*
+
+    # Define target environments
+    - list:
+        elements:
+        - cluster: kind-dev
+          environment: dev
+          server: https://kind-dev-control-plane:6443
+          valuesFile: values-dev.yaml
+        - cluster: kind-prod
+          environment: prod
+          server: https://kind-prod-control-plane:6443
+          valuesFile: values-prod.yaml
+```
+
+**How It Works:**
+1. ApplicationSet scans `k8s/team-apps/*` for team directories
+2. For each team directory, generates Applications for dev + prod environments
+3. Applications use environment-specific values files (`values-dev.yaml`, `values-prod.yaml`)
+4. Management ArgoCD deploys to remote clusters via cluster secrets
+
+### Adding a New Team
+
+**1. Copy Template:**
+```bash
+cp -r k8s/team-apps/team-a k8s/team-apps/team-c
+```
+
+**2. Update Configuration:**
+
+`k8s/team-apps/team-c/config.yaml`:
+```yaml
+team:
+  name: team-c
+  namespace: team-c
+  routePath: /team-c
+  owner: "charlie@example.com"
+  slackChannel: "#team-c-alerts"
+  version:
+    dev: main      # Latest from main branch
+    prod: v1.0.0   # Specific Git tag
+```
+
+`k8s/team-apps/team-c/Chart.yaml`:
+```yaml
+name: team-c-app
+description: Team C application deployment
+```
+
+`k8s/team-apps/team-c/values.yaml`:
+```yaml
+teamName: team-c
+routePath: /team-c
+namespace:
+  name: team-c
+config:
+  location: "Team C Office"
+```
+
+**3. Commit and Push:**
+```bash
+git add k8s/team-apps/team-c
+git commit -m "feat: Add team-c application"
+git push
+```
+
+**4. Verify Auto-Creation:**
+```bash
+# ApplicationSet automatically creates Applications
+export KUBECONFIG=~/.kube/kind-kind-mgmt
+kubectl get applications -n argocd -l team=team-c
+
+# Expected output:
+# team-c-dev
+# team-c-prod
+```
+
+**5. Access Team Application:**
+- **Dev:** `http://dev.cuddly-disco.ai.localhost:3000/team-c`
+- **Prod:** `http://cuddly-disco.ai.localhost:3001/team-c`
+
+### Team App Structure
+
+Each team directory contains:
+
+```
+team-name/
+├── config.yaml          # Team metadata
+├── Chart.yaml           # Helm chart definition
+├── values.yaml          # Base Helm values
+├── values-dev.yaml      # Dev environment overrides
+├── values-prod.yaml     # Prod environment overrides
+└── templates/           # Helm templates
+    ├── _helpers.tpl     # Template helpers
+    ├── namespace.yaml   # Creates team namespace
+    ├── configmap.yaml   # Environment variables
+    ├── deployment.yaml  # Pod deployment with health probes
+    ├── service.yaml     # ClusterIP service
+    └── httproute.yaml   # Path-based routing
+```
+
+**Key Features:**
+- **Namespace per team:** Each team gets `team-name` namespace in both dev and prod
+- **Path-based routing:** Teams share Gateway, routed by path prefix (`/team-a`, `/team-b`)
+- **Environment-specific values:** Different replicas, resources, hostnames per environment
+- **Health probes:** Startup, liveness, and readiness probes for resilience
+- **ConfigMap with checksum:** Auto-restart pods when config changes
+
+### Deployment Workflow
+
+**Dev to Prod Promotion:**
+
+1. **Develop in Dev:**
+   ```bash
+   # Make changes to team-a app
+   git add k8s/team-apps/team-a
+   git commit -m "feat: Add new feature to team-a"
+   git push
+
+   # ApplicationSet auto-syncs to dev cluster
+   # Test: http://dev.cuddly-disco.ai.localhost:3000/team-a
+   ```
+
+2. **Create Release Tag:**
+   ```bash
+   # When ready for prod, create Git tag
+   git tag -a v1.2.0 -m "Release v1.2.0"
+   git push origin v1.2.0
+   ```
+
+3. **Update Prod Version:**
+   ```bash
+   # Update config.yaml to use new tag
+   # (Future enhancement - currently uses HEAD)
+   git commit -m "chore: Promote team-a to v1.2.0 in prod"
+   git push
+   ```
+
+### Monitoring Multi-Cluster Deployments
+
+**From Management Cluster:**
+```bash
+export KUBECONFIG=~/.kube/kind-kind-mgmt
+
+# List all team applications
+kubectl get applications -n argocd
+
+# View specific team across environments
+kubectl get applications -n argocd -l team=team-a
+
+# Check sync status
+kubectl get applications -n argocd -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.sync.status}{"\n"}{end}'
+
+# View ApplicationSet status
+kubectl get applicationset team-apps -n argocd -o yaml
+```
+
+**From Target Clusters:**
+```bash
+# Dev cluster
+export KUBECONFIG=~/.kube/kind-kind-dev
+kubectl get pods -n team-a
+kubectl get httproute -n team-a
+
+# Prod cluster
+export KUBECONFIG=~/.kube/kind-kind-prod
+kubectl get pods -n team-a
+kubectl get httproute -n team-a
+```
+
+**ArgoCD UI:**
+- Management: http://localhost:30082
+- View all Applications in grid view
+- Filter by team label
+- See sync status, health, and errors
+
+### Troubleshooting Multi-Cluster
+
+**ApplicationSet Not Generating Applications:**
+```bash
+export KUBECONFIG=~/.kube/kind-kind-mgmt
+
+# Check ApplicationSet status
+kubectl get applicationset team-apps -n argocd -o yaml
+
+# View ApplicationSet controller logs
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-applicationset-controller
+
+# Verify Git directory exists
+ls k8s/team-apps/
+```
+
+**Cluster Not Registered:**
+```bash
+# List cluster secrets
+kubectl get secrets -n argocd -l argocd.argoproj.io/secret-type=cluster
+
+# Verify cluster connectivity
+kubectl exec -it -n argocd deployment/argocd-server -- argocd cluster list
+
+# Re-run Terraform to register
+cd infrastructure/mgmt && terraform apply
+```
+
+**Application Sync Failed:**
+```bash
+# View application details
+kubectl get application team-a-dev -n argocd -o yaml
+
+# Check sync errors
+kubectl describe application team-a-dev -n argocd
+
+# Force sync
+kubectl patch application team-a-dev -n argocd \
+  --type merge \
+  -p '{"operation":{"initiatedBy":{"username":"admin"},"sync":{}}}'
+```
+
+**HTTPRoute Not Working:**
+```bash
+# Check Gateway on target cluster
+export KUBECONFIG=~/.kube/kind-kind-dev
+kubectl get gateway -n istio-system cuddly-disco-gateway
+kubectl get httproute -n team-a
+
+# Test routing
+curl -v -H "Host: dev.cuddly-disco.ai.localhost" http://localhost:3000/team-a
+```
+
+### Best Practices
+
+**Team Onboarding:**
+1. Copy existing team directory as template
+2. Update all team-specific values (name, namespace, routePath)
+3. Test Helm chart locally: `helm lint k8s/team-apps/team-name`
+4. Preview templates: `helm template team-name k8s/team-apps/team-name`
+5. Commit and push - ApplicationSet auto-creates Applications
+6. Monitor sync in ArgoCD UI
+7. Test endpoints in both dev and prod
+
+**Version Management:**
+- **Dev:** Always uses `main` branch (continuous deployment)
+- **Prod:** Use Git tags for stability (`v1.0.0`, `v1.1.0`)
+- Update `config.yaml` version field when promoting to prod (planned feature)
+
+**Resource Management:**
+- Dev: Lower limits (cpu: 100m, memory: 128Mi)
+- Prod: Higher limits (cpu: 300m, memory: 512Mi)
+- Adjust per team in values files based on actual usage
+
+**Security:**
+- Each team has isolated namespace
+- Network policies can be added per team
+- RBAC can restrict team access to their namespace only
+- Secrets managed via Kubernetes Secrets (not in Git)
+
+### Future Enhancements
+
+Planned improvements:
+- **Version pinning:** Use `config.yaml` version field to set `targetRevision` per environment
+- **Helm chart registry:** Publish charts to OCI registry instead of Git
+- **Progressive delivery:** Canary deployments with Argo Rollouts
+- **Auto-scaling:** HPA based on CPU/memory metrics
+- **Resource quotas:** Per-team resource limits
+- **Subdomain routing:** Option for `team-a.dev.example.com` instead of path-based
