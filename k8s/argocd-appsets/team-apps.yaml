@@ -20,11 +20,9 @@ spec:
           elements:
           - cluster: kind-dev
             environment: dev
-            server: https://kind-dev-control-plane:6443
             valuesFile: values-dev.yaml
           - cluster: kind-prod
             environment: prod
-            server: https://kind-prod-control-plane:6443
             valuesFile: values-prod.yaml
 
   # Template to generate Applications for each team × environment combination
@@ -48,7 +46,7 @@ spec:
           - '{{valuesFile}}'
 
       destination:
-        server: '{{server}}'
+        name: '{{cluster}}'
         namespace: '{{path.basename}}'
 
       syncPolicy:
