@@ -5,6 +5,17 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      promote_to_prod:
+        description: 'Promote latest release to production'
+        required: true
+        type: boolean
+        default: false
+      version:
+        description: 'Version to promote (e.g., v1.2.3)'
+        required: false
+        type: string
 
 # Default permissions - restrictive by default
 permissions:
@@ -295,8 +306,8 @@ jobs:
           docker push ${REGISTRY}/${IMAGE_NAME}/frontend:${VERSION}
           docker push ${REGISTRY}/${IMAGE_NAME}/frontend:latest
 
-  update-helm-charts:
-    name: Update Helm Chart Versions
+  update-helm-charts-dev:
+    name: Update Helm Chart Versions (Dev)
     runs-on: ubuntu-latest
     needs: [semantic-release, publish-images]
     # Only run if a release was created AND images were published
@@ -313,17 +324,17 @@ jobs:
           token: ${{ secrets.BOT_GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Update Helm chart versions
+      - name: Update dev Helm chart versions
         env:
           VERSION: ${{ needs.semantic-release.outputs.version }}
         run: |
-          # Update frontend values.yaml
-          sed -i 's/tag: "[^"]*"/tag: "'"${VERSION}"'"/' k8s/frontend/values.yaml
+          # Update frontend values-dev.yaml in team-apps
+          sed -i 's/tag: "[^"]*"/tag: "'"${VERSION}"'"/' k8s/team-apps/frontend/values-dev.yaml
 
-          # Update backend values.yaml
-          sed -i 's/tag: "[^"]*"/tag: "'"${VERSION}"'"/' k8s/backend/values.yaml
+          # Update backend values-dev.yaml in team-apps
+          sed -i 's/tag: "[^"]*"/tag: "'"${VERSION}"'"/' k8s/team-apps/backend/values-dev.yaml
 
-          echo "✅ Updated Helm charts to version ${VERSION}"
+          echo "✅ Updated dev Helm charts to version ${VERSION}"
 
       - name: Commit and push changes
         env:
@@ -332,7 +343,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add k8s/frontend/values.yaml k8s/backend/values.yaml
+          git add k8s/team-apps/frontend/values-dev.yaml k8s/team-apps/backend/values-dev.yaml
 
           # Check if there are changes to commit
           if git diff --staged --quiet; then
@@ -340,7 +351,68 @@ jobs:
             exit 0
           fi
 
-          git commit -m "chore: Update Helm chart versions to ${VERSION} [skip ci]"
+          git commit -m "chore: Update dev Helm chart versions to ${VERSION} [skip ci]"
           git push origin main
 
-          echo "✅ Pushed Helm chart version updates to main branch"
+          echo "✅ Pushed dev Helm chart version updates to main branch"
+
+  update-helm-charts-prod:
+    name: Update Helm Chart Versions (Prod)
+    runs-on: ubuntu-latest
+    # Only run when manually triggered via workflow_dispatch with promote_to_prod=true
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.promote_to_prod == 'true'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Use a PAT to allow the commit to trigger ArgoCD webhooks
+          # GITHUB_TOKEN won't trigger webhooks to prevent recursive workflows
+          token: ${{ secrets.BOT_GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Determine version to promote
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Get latest Git tag if no version specified
+            VERSION=$(git describe --tags --abbrev=0)
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Promoting version: ${VERSION}"
+
+      - name: Update prod Helm chart versions
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Update frontend values-prod.yaml in team-apps
+          sed -i 's/tag: "[^"]*"/tag: "'"${VERSION}"'"/' k8s/team-apps/frontend/values-prod.yaml
+
+          # Update backend values-prod.yaml in team-apps
+          sed -i 's/tag: "[^"]*"/tag: "'"${VERSION}"'"/' k8s/team-apps/backend/values-prod.yaml
+
+          echo "✅ Updated prod Helm charts to version ${VERSION}"
+
+      - name: Commit and push changes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add k8s/team-apps/frontend/values-prod.yaml k8s/team-apps/backend/values-prod.yaml
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: Update prod Helm chart versions to ${VERSION} [skip ci]"
+          git push origin main
+
+          echo "✅ Pushed prod Helm chart version updates to main branch"
