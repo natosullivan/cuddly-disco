@@ -1,5 +1,9 @@
 # Dev environment overrides for frontend
 
+# Image tag for dev
+image:
+  tag: "v1.2.1"
+
 # Fewer replicas for dev
 replicaCount: 1
 

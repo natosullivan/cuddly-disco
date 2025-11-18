@@ -1,5 +1,9 @@
 # Prod environment overrides for frontend
 
+# Image tag for prod
+image:
+  tag: "v1.2.1"
+
 # Replicas for prod
 replicaCount: 1
 
