@@ -2,7 +2,7 @@
 
 # Image tag for dev
 image:
-  tag: "v1.2.1"
+  tag: "v1.3.0"
 
 # Fewer replicas for dev
 replicaCount: 1
