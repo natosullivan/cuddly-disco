@@ -56,6 +56,11 @@ export default async function Home() {
         <p className="ad-tagline">Cloud-native dairy delivered on demand</p>
         <p className="ad-features">✓ 99.9% uptime ✓ Auto-scaling freshness ✓ Enterprise support</p>
       </div>
+      <div className="advertisement">
+        <p className="ad-title">🔒 Managed IT Encryption</p>
+        <p className="ad-tagline">Your files, encrypted and secure* (*definitely not ransomware)</p>
+        <p className="ad-features">✓ Automatic encryption ✓ 24/7 "support" ✓ Crypto payments only</p>
+      </div>
     </div>
   )
 }
