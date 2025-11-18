@@ -59,7 +59,7 @@ export default async function Home() {
       <div className="advertisement">
         <p className="ad-title">🔒 Managed IT Encryption</p>
         <p className="ad-tagline">Your files, encrypted and secure* (*definitely not ransomware)</p>
-        <p className="ad-features">✓ Automatic encryption ✓ 24/7 "support" ✓ Crypto payments only</p>
+        <p className="ad-features">✓ Automatic encryption ✓ 24/7 &ldquo;support&rdquo; ✓ Crypto payments only</p>
       </div>
     </div>
   )
