@@ -1,0 +1,3 @@
+# Gateway manifests are now created in the root module directory (dev/prod/mgmt)
+# to prevent race conditions during parallel deployments
+gateway-*.yaml

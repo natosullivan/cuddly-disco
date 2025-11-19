@@ -213,3 +213,99 @@ switch_cluster_context() {
         return 1
     fi
 }
+
+# Wait for ArgoCD application to sync
+# Usage: wait_for_argocd_sync <app_name> <timeout_seconds> [namespace]
+wait_for_argocd_sync() {
+    local app_name=$1
+    local timeout=${2:-300}
+    local namespace=${3:-"argocd"}
+    local elapsed=0
+    local interval=5
+
+    echo "Waiting for ArgoCD application '$app_name' to sync (timeout: ${timeout}s)..."
+
+    while [ $elapsed -lt $timeout ]; do
+        # Check if application exists
+        if ! kubectl get application "$app_name" -n "$namespace" &>/dev/null; then
+            echo "Application '$app_name' not found in namespace '$namespace'"
+            sleep $interval
+            elapsed=$((elapsed + interval))
+            continue
+        fi
+
+        # Check sync status
+        local sync_status
+        sync_status=$(kubectl get application "$app_name" -n "$namespace" -o jsonpath='{.status.sync.status}' 2>/dev/null)
+
+        if [ "$sync_status" = "Synced" ]; then
+            echo "Application '$app_name' is Synced"
+            return 0
+        fi
+
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+
+    echo "Timeout waiting for application '$app_name' to sync"
+    kubectl get application "$app_name" -n "$namespace" -o yaml 2>/dev/null || echo "Application not found"
+    return 1
+}
+
+# Check ArgoCD application health
+# Usage: check_application_health <app_name> [namespace]
+check_application_health() {
+    local app_name=$1
+    local namespace=${2:-"argocd"}
+
+    # Check if application exists
+    if ! kubectl get application "$app_name" -n "$namespace" &>/dev/null; then
+        echo "Application '$app_name' not found in namespace '$namespace'"
+        return 1
+    fi
+
+    # Check health status
+    local health_status
+    health_status=$(kubectl get application "$app_name" -n "$namespace" -o jsonpath='{.status.health.status}' 2>/dev/null)
+
+    if [ "$health_status" = "Healthy" ]; then
+        return 0
+    else
+        echo "Application '$app_name' is not Healthy (status: $health_status)"
+        kubectl get application "$app_name" -n "$namespace" -o jsonpath='{.status.health}' 2>/dev/null
+        echo ""
+        return 1
+    fi
+}
+
+# Test HTTP endpoint
+# Usage: test_http_endpoint <url> <expected_status> [host_header]
+test_http_endpoint() {
+    local url=$1
+    local expected_status=${2:-200}
+    local host_header=$3
+
+    local curl_opts="-s -o /dev/null -w %{http_code}"
+    if [ -n "$host_header" ]; then
+        curl_opts="$curl_opts -H Host:$host_header"
+    fi
+
+    # Add timeout to prevent hanging
+    curl_opts="$curl_opts --connect-timeout 10 --max-time 30"
+
+    local actual_status
+    actual_status=$(curl $curl_opts "$url" 2>/dev/null)
+    local curl_exit=$?
+
+    if [ $curl_exit -ne 0 ]; then
+        echo "curl failed with exit code $curl_exit"
+        return 1
+    fi
+
+    if [ "$actual_status" = "$expected_status" ]; then
+        return 0
+    else
+        echo "Expected HTTP $expected_status but got $actual_status from $url"
+        return 1
+    fi
+}

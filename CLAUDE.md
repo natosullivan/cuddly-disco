@@ -302,6 +302,15 @@ The project supports deployment to Kubernetes using ArgoCD for GitOps-based cont
   - Gateway API: NodePort 30001 → host 3001
 - Production-ready configuration for local testing
 
+**LocalDev Environment** (`infrastructure/localdev/`):
+- Creates single-node Kind cluster (control-plane only)
+- **No ArgoCD** - Optimized for direct kubectl/helm deployment
+- Installs Istio with Gateway hostname: `localdev.cuddly-disco.ai.localhost`
+- Port mappings (avoids conflicts with other clusters):
+  - Gateway API: NodePort 30001 → host 8080
+- Personal development sandbox for direct deployment testing
+- Use for local experimentation without GitOps automation
+
 **Terraform Commands:**
 ```bash
 # Dev environment
@@ -324,6 +333,19 @@ terraform apply
 
 # Access ArgoCD UI (prod)
 open http://localhost:30081  # Login: admin/<password>
+
+# LocalDev environment (no ArgoCD)
+cd infrastructure/localdev
+terraform init
+terraform plan
+terraform apply
+
+# Configure kubectl for localdev
+export KUBECONFIG=~/.kube/kind-kind-localdev
+
+# Deploy directly with kubectl or helm
+kubectl apply -f your-manifest.yaml
+helm install myapp path/to/chart
 ```
 
 ### Kubernetes Manifests
@@ -516,10 +538,14 @@ kubectl patch application frontend -n argocd \
 - **Local (Prod):** http://localhost:3001 with Host header `cuddly-disco.ai.localhost`
   - Via curl: `curl -H "Host: cuddly-disco.ai.localhost" http://localhost:3001`
   - Via browser: Add `127.0.0.1 cuddly-disco.ai.localhost` to `/etc/hosts`, then visit `http://cuddly-disco.ai.localhost:3001`
+- **Local (LocalDev):** http://localhost:8080 with Host header `localdev.cuddly-disco.ai.localhost`
+  - Via curl: `curl -H "Host: localdev.cuddly-disco.ai.localhost" http://localhost:8080`
+  - Via browser: Add `127.0.0.1 localdev.cuddly-disco.ai.localhost` to `/etc/hosts`, then visit `http://localdev.cuddly-disco.ai.localhost:8080`
 - **In-cluster:** `http://frontend-service.cuddly-disco-frontend.svc.cluster.local:3000`
 - **Architecture:**
   - Dev: Gateway API (NodePort 30001 → host 3000) → HTTPRoute → ClusterIP Service
   - Prod: Gateway API (NodePort 30001 → host 3001) → HTTPRoute → ClusterIP Service
+  - LocalDev: Gateway API (NodePort 30001 → host 8080) → HTTPRoute → ClusterIP Service
 
 **Backend:**
 - **Local:** Not exposed (ClusterIP only)
@@ -533,6 +559,7 @@ kubectl patch application frontend -n argocd \
 **ArgoCD:**
 - **UI (Dev):** http://localhost:30080 (NodePort)
 - **UI (Prod):** http://localhost:30081 (NodePort)
+- **UI (LocalDev):** Not available (LocalDev cluster has no ArgoCD)
 - **Username:** `admin`
 - **Password:** `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`
 
@@ -566,17 +593,18 @@ kubectl describe httproute -n cuddly-disco-frontend
 # Check Gateway status (Accepted, Programmed, Ready)
 kubectl get gateway -n istio-system cuddly-disco-gateway -o jsonpath='{.status.conditions[*].type}'
 
-# Check ArgoCD app status
+# Check ArgoCD app status (dev/prod only, not localdev)
 kubectl get application frontend -n argocd -o yaml
 kubectl get application backend -n argocd -o yaml
 
-# Force sync
+# Force sync (dev/prod only, not localdev)
 argocd app sync frontend --force
 argocd app sync backend --force
 
 # Test Gateway directly
 curl -v -H "Host: dev.cuddly-disco.ai.localhost" http://localhost:3000      # Dev
 curl -v -H "Host: cuddly-disco.ai.localhost" http://localhost:3001          # Prod
+curl -v -H "Host: localdev.cuddly-disco.ai.localhost" http://localhost:8080 # LocalDev
 
 # Test backend connectivity from frontend pod
 kubectl exec -it -n cuddly-disco-frontend <frontend-pod> -- sh

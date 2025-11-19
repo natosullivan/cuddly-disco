@@ -16,3 +16,4 @@ terraform.rc
 # Sensitive files
 *.pem
 *.key
+gateway-*.yaml

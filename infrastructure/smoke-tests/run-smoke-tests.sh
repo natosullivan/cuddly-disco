@@ -29,6 +29,19 @@ CLUSTER_HAS_ISTIO["kind-dev"]="true"
 CLUSTER_HAS_ISTIO["kind-prod"]="true"
 CLUSTER_HAS_ISTIO["kind-mgmt"]="false"
 
+declare -A CLUSTER_GATEWAY_PORT
+CLUSTER_GATEWAY_PORT["kind-dev"]="3000"
+CLUSTER_GATEWAY_PORT["kind-prod"]="3001"
+CLUSTER_GATEWAY_PORT["kind-mgmt"]=""
+
+declare -A CLUSTER_HOSTNAME
+CLUSTER_HOSTNAME["kind-dev"]="dev.cuddly-disco.ai.localhost"
+CLUSTER_HOSTNAME["kind-prod"]="cuddly-disco.ai.localhost"
+CLUSTER_HOSTNAME["kind-mgmt"]=""
+
+# Application deployment mode (can be overridden via env var)
+DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-"multi"}  # "multi" or "single"
+
 # Function to print usage
 print_usage() {
     echo "Usage: $0 [cluster-name|all]"
@@ -47,8 +60,11 @@ print_usage() {
 # Function to run tests for a specific cluster
 run_cluster_tests() {
     local cluster_name=$1
+    local skip_app_tests=${2:-false}
     local argocd_port=${CLUSTER_PORTS[$cluster_name]:-"30080"}
     local has_istio=${CLUSTER_HAS_ISTIO[$cluster_name]:-"false"}
+    local gateway_port=${CLUSTER_GATEWAY_PORT[$cluster_name]:-""}
+    local hostname=${CLUSTER_HOSTNAME[$cluster_name]:-""}
 
     echo ""
     echo -e "${BLUE}=========================================="
@@ -103,6 +119,21 @@ run_cluster_tests() {
     else
         echo ""
         echo "Skipping Test 03: Istio Health (cluster does not have Istio)"
+    fi
+
+    # Run test 04: Application Deployment (if not skipped)
+    if [ "$skip_app_tests" = "false" ]; then
+        echo ""
+        echo "Running Test 04: Application Deployment..."
+        if bash "$SCRIPT_DIR/tests/04-app-deployment.sh" "$cluster_name" "$DEPLOYMENT_MODE" "$gateway_port" "$hostname"; then
+            echo -e "${GREEN}Test 04 passed${NC}"
+        else
+            echo -e "${RED}Test 04 failed${NC}"
+            all_tests_passed=false
+        fi
+    else
+        echo ""
+        echo "Skipping Test 04: Application Deployment (infrastructure tests only)"
     fi
 
     # Print final result for cluster

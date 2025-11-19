@@ -70,8 +70,10 @@ resource "helm_release" "istiod" {
 }
 
 # Create Gateway manifest file
+# Use path.root to ensure each cluster deployment has its own manifest file
+# This prevents race conditions when deploying multiple clusters in parallel
 resource "local_file" "gateway_manifest" {
-  filename = "${path.module}/gateway-${var.gateway_name}.yaml"
+  filename = "${path.root}/gateway-${var.gateway_name}.yaml"
   content  = <<-EOT
     apiVersion: gateway.networking.k8s.io/v1
     kind: Gateway
