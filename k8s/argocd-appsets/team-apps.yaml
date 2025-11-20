@@ -15,23 +15,33 @@ spec:
           directories:
           - path: k8s/team-apps/*
 
-      # Generator 2: Define target environments (dev and prod clusters)
+      # Generator 2: Define target environments with version support
       - list:
           elements:
+          # Dev cluster - v1 (default version)
           - cluster: kind-dev
             environment: dev
+            version: v1
             valuesFile: values-dev.yaml
+          # Dev cluster - v2 (header-based routing)
+          - cluster: kind-dev
+            environment: dev
+            version: v2
+            valuesFile: values-dev-v2.yaml
+          # Prod cluster - v1 only (for now)
           - cluster: kind-prod
             environment: prod
+            version: v1
             valuesFile: values-prod.yaml
 
-  # Template to generate Applications for each team × environment combination
+  # Template to generate Applications for each team × environment × version combination
   template:
     metadata:
-      name: '{{path.basename}}-{{environment}}'
+      name: '{{path.basename}}-{{environment}}-{{version}}'
       labels:
         team: '{{path.basename}}'
         environment: '{{environment}}'
+        version: '{{version}}'
     spec:
       project: default
 

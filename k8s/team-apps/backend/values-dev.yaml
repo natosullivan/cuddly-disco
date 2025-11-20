@@ -1,6 +1,14 @@
-# Dev environment overrides for backend
+# Dev environment overrides for backend v1
 
-# Image tag for dev
+# Version configuration
+version:
+  name: "v1"
+
+# Namespace configuration (v1 creates the namespace)
+namespace:
+  create: true
+
+# Image tag for dev v1
 image:
   tag: "v1.3.0"
 

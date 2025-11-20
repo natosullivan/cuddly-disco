@@ -1,0 +1,34 @@
+# Dev environment overrides for frontend v2 (header-based routing)
+
+# Version configuration
+version:
+  name: "v2"
+  isDefault: false  # Requires X-Version: v2 header
+
+# Image tag for dev v2
+image:
+  tag: "v1.3.0"  # Update this to use a different image tag when needed
+
+# Namespace configuration (v2 does NOT create namespace, uses existing)
+namespace:
+  create: false
+
+# Fewer replicas for dev
+replicaCount: 1
+
+# Dev gateway hostname (same as v1, routing differentiated by header)
+gateway:
+  hostname: dev.cuddly-disco.ai.localhost
+
+# Dev-specific configuration
+config:
+  location: "Development V2"
+
+# Lower resource limits for dev
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi

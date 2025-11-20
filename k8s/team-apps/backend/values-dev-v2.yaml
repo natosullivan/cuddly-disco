@@ -1,0 +1,25 @@
+# Dev environment overrides for backend v2
+
+# Version configuration
+version:
+  name: "v2"
+
+# Image tag for dev v2
+image:
+  tag: "v1.3.0"  # Update this to use a different image tag when needed
+
+# Namespace configuration (v2 does NOT create namespace, uses existing)
+namespace:
+  create: false
+
+# Fewer replicas for dev
+replicaCount: 1
+
+# Lower resource limits for dev
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi

@@ -4,6 +4,11 @@
 teamName: frontend
 routePath: /
 
+# Version configuration (for multi-version deployments)
+version:
+  name: ""  # Version identifier (e.g., "v1", "v2")
+  isDefault: true  # Whether this version is the default (no header required)
+
 # Namespace configuration
 namespace:
   name: frontend
@@ -22,7 +27,6 @@ replicaCount: 1
 service:
   type: ClusterIP
   port: 3000
-  name: frontend-service
 
 # Gateway configuration
 gateway:

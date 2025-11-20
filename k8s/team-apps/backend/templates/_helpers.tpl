@@ -39,6 +39,9 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/team: {{ .Values.teamName }}
+{{- if .Values.version.name }}
+app.kubernetes.io/app-version: {{ .Values.version.name | quote }}
+{{- end }}
 {{- end }}
 
 {{/*

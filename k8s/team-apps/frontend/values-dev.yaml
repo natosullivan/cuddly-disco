@@ -1,6 +1,15 @@
-# Dev environment overrides for frontend
+# Dev environment overrides for frontend v1 (default version)
 
-# Image tag for dev
+# Version configuration
+version:
+  name: "v1"
+  isDefault: true  # Default version, no header required
+
+# Namespace configuration (v1 creates the namespace)
+namespace:
+  create: true
+
+# Image tag for dev v1
 image:
   tag: "v1.3.0"
 

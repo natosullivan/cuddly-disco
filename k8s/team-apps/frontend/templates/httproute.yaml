@@ -17,7 +17,12 @@ spec:
     - path:
         type: PathPrefix
         value: {{ .Values.routePath }}
+{{- if not .Values.version.isDefault }}
+      headers:
+      - name: X-Version
+        value: {{ .Values.version.name | quote }}
+{{- end }}
     backendRefs:
-    - name: {{ .Values.service.name }}
+    - name: {{ include "frontend-app.fullname" . }}
       port: {{ .Values.service.port }}
 {{- end }}
