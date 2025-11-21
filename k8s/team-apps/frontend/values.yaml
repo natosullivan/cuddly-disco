@@ -25,6 +25,9 @@ replicaCount: 1
 
 # Service configuration
 service:
+  # Service name (defaults to "frontend-service" if not specified)
+  # Can be overridden per instance to create unique service names
+  name: ""
   type: ClusterIP
   port: 3000
 

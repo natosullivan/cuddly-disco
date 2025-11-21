@@ -121,9 +121,10 @@ if [ "$CHECK_DEPLOYED_RESOURCES" = true ]; then
             print_test_result "FAIL" "Backend pods failed to become ready"
         fi
 
-        # Check backend service
-        if check_resource_exists "service" "backend-service" "backend"; then
-            print_test_result "PASS" "Backend service exists"
+        # Check backend service (any service in the namespace)
+        if kubectl get svc -n backend --no-headers 2>/dev/null | grep -q .; then
+            BACKEND_SVC=$(kubectl get svc -n backend --no-headers 2>/dev/null | head -1 | awk '{print $1}')
+            print_test_result "PASS" "Backend service exists ($BACKEND_SVC)"
         else
             print_test_result "FAIL" "Backend service not found"
         fi
@@ -144,9 +145,10 @@ if [ "$CHECK_DEPLOYED_RESOURCES" = true ]; then
             print_test_result "FAIL" "Frontend pods failed to become ready"
         fi
 
-        # Check frontend service
-        if check_resource_exists "service" "frontend-service" "frontend"; then
-            print_test_result "PASS" "Frontend service exists"
+        # Check frontend service (any service in the namespace)
+        if kubectl get svc -n frontend --no-headers 2>/dev/null | grep -q .; then
+            FRONTEND_SVC=$(kubectl get svc -n frontend --no-headers 2>/dev/null | head -1 | awk '{print $1}')
+            print_test_result "PASS" "Frontend service exists ($FRONTEND_SVC)"
         else
             print_test_result "FAIL" "Frontend service not found"
         fi
@@ -170,38 +172,45 @@ if [ "$CHECK_DEPLOYED_RESOURCES" = true ]; then
 
     # Start port-forward in background
     echo "Starting port-forward to backend service..."
-    kubectl port-forward -n backend svc/backend-service 5000:5000 >/dev/null 2>&1 &
-    PORT_FORWARD_PID=$!
-
-    # Wait for port-forward to be ready
-    sleep 3
-
-    # Test health endpoint
-    echo "Testing backend /health endpoint..."
-    if test_http_endpoint "http://localhost:5000/health" 200; then
-        print_test_result "PASS" "Backend /health endpoint returns 200"
+    # Get the first backend service
+    BACKEND_SVC=$(kubectl get svc -n backend --no-headers 2>/dev/null | head -1 | awk '{print $1}')
+    if [ -z "$BACKEND_SVC" ]; then
+        print_test_result "FAIL" "No backend service found for port-forward"
+        echo ""
     else
-        print_test_result "FAIL" "Backend /health endpoint failed"
-    fi
+        kubectl port-forward -n backend svc/$BACKEND_SVC 5000:5000 >/dev/null 2>&1 &
+        PORT_FORWARD_PID=$!
 
-    # Test message endpoint
-    echo "Testing backend /api/message endpoint..."
-    if test_http_endpoint "http://localhost:5000/api/message" 200; then
-        print_test_result "PASS" "Backend /api/message endpoint returns 200"
+        # Wait for port-forward to be ready
+        sleep 3
 
-        # Verify response is valid JSON with message field
-        MESSAGE=$(curl -s http://localhost:5000/api/message 2>/dev/null | grep -o '"message"' || echo "")
-        if [ -n "$MESSAGE" ]; then
-            print_test_result "PASS" "Backend response contains 'message' field"
+        # Test health endpoint
+        echo "Testing backend /health endpoint..."
+        if test_http_endpoint "http://localhost:5000/health" 200; then
+            print_test_result "PASS" "Backend /health endpoint returns 200"
         else
-            print_test_result "FAIL" "Backend response doesn't contain expected 'message' field"
+            print_test_result "FAIL" "Backend /health endpoint failed"
         fi
-    else
-        print_test_result "FAIL" "Backend /api/message endpoint failed"
-    fi
 
-    # Kill port-forward
-    kill $PORT_FORWARD_PID 2>/dev/null || true
+        # Test message endpoint
+        echo "Testing backend /api/message endpoint..."
+        if test_http_endpoint "http://localhost:5000/api/message" 200; then
+            print_test_result "PASS" "Backend /api/message endpoint returns 200"
+
+            # Verify response is valid JSON with message field
+            MESSAGE=$(curl -s http://localhost:5000/api/message 2>/dev/null | grep -o '"message"' || echo "")
+            if [ -n "$MESSAGE" ]; then
+                print_test_result "PASS" "Backend response contains 'message' field"
+            else
+                print_test_result "FAIL" "Backend response doesn't contain expected 'message' field"
+            fi
+        else
+            print_test_result "FAIL" "Backend /api/message endpoint failed"
+        fi
+
+        # Kill port-forward
+        kill $PORT_FORWARD_PID 2>/dev/null || true
+    fi
     echo ""
 
     # Test 5: Test frontend via Gateway

@@ -263,21 +263,33 @@ wait_for_argocd_sync() {
     local timeout=${3:-300}
     local elapsed=0
     local interval=5
+    local last_status=""
 
     while [ $elapsed -lt $timeout ]; do
         local sync_status=$(kubectl get application "$app_name" -n "$namespace" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "")
         local health_status=$(kubectl get application "$app_name" -n "$namespace" -o jsonpath='{.status.health.status}' 2>/dev/null || echo "")
 
+        # Print status update if it changed
+        if [ "$sync_status" != "$last_status" ] && [ -n "$sync_status" ]; then
+            print_msg "$CYAN" "    Status: sync=$sync_status, health=$health_status (${elapsed}s elapsed)"
+            last_status="$sync_status"
+        fi
+
         if [ "$sync_status" = "Synced" ]; then
-            print_msg "$GREEN" "  ✓ $app_name synced (health: $health_status)"
+            print_msg "$GREEN" "    ✓ $app_name synced (health: $health_status)"
             return 0
         fi
 
         sleep $interval
         elapsed=$((elapsed + interval))
+
+        # Print periodic progress updates every 30 seconds
+        if [ $((elapsed % 30)) -eq 0 ]; then
+            print_msg "$CYAN" "    Still waiting... (${elapsed}s/${timeout}s)"
+        fi
     done
 
-    print_msg "$YELLOW" "  ⚠ Timeout waiting for $app_name to sync (status: $sync_status)"
+    print_msg "$YELLOW" "    ⚠ Timeout waiting for $app_name to sync (status: $sync_status)"
     return 1
 }
 
@@ -322,13 +334,25 @@ deploy_apps_multi_mode() {
     sleep 10
 
     print_msg "$CYAN" "→ Checking generated applications..."
+    local app_count=$(kubectl get applications -n argocd --no-headers 2>/dev/null | wc -l)
+    print_msg "$CYAN" "  Found $app_count applications"
     kubectl get applications -n argocd
 
     print_msg "$CYAN" "→ Waiting for applications to sync..."
-    for app in backend-dev backend-prod frontend-dev frontend-prod; do
-        print_msg "$CYAN" "  Waiting for $app..."
-        wait_for_argocd_sync "$app" "argocd" 300 || true
-    done
+    # Get all generated application names dynamically
+    local apps=$(kubectl get applications -n argocd -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+
+    if [ -n "$apps" ]; then
+        local total_apps=$(echo "$apps" | wc -w)
+        local current=1
+        for app in $apps; do
+            print_msg "$CYAN" "  [$current/$total_apps] Waiting for $app to sync..."
+            wait_for_argocd_sync "$app" "argocd" 180 || true
+            ((current++))
+        done
+    else
+        print_msg "$YELLOW" "  ⚠ No applications found to wait for"
+    fi
 
     print_msg "$GREEN" "✓ ApplicationSet deployed and applications synced"
     echo ""
@@ -469,21 +493,32 @@ main() {
 
     if [ "$deploy_dev" = true ] || [ "$deploy_prod" = true ]; then
         print_msg "$GREEN" "✓ Phase 1 complete"
+        echo ""  # Add blank line for readability
     else
         print_msg "$YELLOW" "Phase 1 skipped (no dev/prod clusters selected)"
     fi
 
     # Phase 2: Run smoke tests on dev/prod (infrastructure only if apps will be deployed later)
+    print_header "Phase 2: Running Infrastructure Smoke Tests"
+
     if [ "$deploy_dev" = true ]; then
+        print_msg "$CYAN" "→ Running smoke tests for dev cluster..."
         run_smoke_tests "dev" true  # Infrastructure tests only for now
     fi
 
     if [ "$deploy_prod" = true ]; then
+        print_msg "$CYAN" "→ Running smoke tests for prod cluster..."
         run_smoke_tests "prod" true  # Infrastructure tests only for now
     fi
 
+    print_msg "$GREEN" "✓ Phase 2 complete"
+    echo ""  # Add blank line for readability
+
     # Phase 3: Deploy management cluster (requires dev/prod to exist for multi-cluster mode)
+    print_header "Phase 3: Deploying Management Cluster"
+
     if [ "$deploy_mgmt" = true ]; then
+        print_msg "$CYAN" "→ Starting mgmt cluster deployment..."
         if [ "$DEPLOYMENT_MODE" = "multi" ]; then
             # Check that dev and prod state files exist
             if [ ! -f "$SCRIPT_DIR/dev/terraform.tfstate" ] || [ ! -f "$SCRIPT_DIR/prod/terraform.tfstate" ]; then
@@ -494,47 +529,69 @@ main() {
         fi
 
         deploy_cluster "mgmt"
+        print_msg "$CYAN" "→ Running smoke tests for mgmt cluster..."
         run_smoke_tests "mgmt" true  # Infrastructure tests only for now
+        print_msg "$GREEN" "✓ Phase 3 complete"
+        echo ""  # Add blank line for readability
+    else
+        print_msg "$YELLOW" "Phase 3 skipped (mgmt cluster not selected)"
+        echo ""  # Add blank line for readability
     fi
 
     # Phase 4: Deploy applications (if not skipped)
     if [ "$SKIP_APPS" = false ]; then
         print_header "Phase 4: Deploying Applications"
+        print_msg "$CYAN" "→ Deployment mode: $DEPLOYMENT_MODE"
 
         if [ "$DEPLOYMENT_MODE" = "multi" ]; then
             # Multi-cluster mode: deploy ApplicationSet to mgmt
             if [ "$deploy_mgmt" = true ]; then
+                print_msg "$CYAN" "→ Deploying ApplicationSet to mgmt cluster..."
                 deploy_apps_multi_mode
+                print_msg "$GREEN" "✓ ApplicationSet deployment complete"
             else
                 print_msg "$YELLOW" "⚠ Skipping multi-cluster app deployment (mgmt cluster not deployed)"
             fi
         else
             # Single-cluster mode: deploy apps to each cluster
             if [ "$deploy_dev" = true ]; then
+                print_msg "$CYAN" "→ Deploying apps to dev cluster..."
                 deploy_apps_single_mode "dev"
             fi
 
             if [ "$deploy_prod" = true ]; then
+                print_msg "$CYAN" "→ Deploying apps to prod cluster..."
                 deploy_apps_single_mode "prod"
             fi
+            print_msg "$GREEN" "✓ Application deployment complete"
         fi
+
+        print_msg "$GREEN" "✓ Phase 4 complete"
+        echo ""  # Add blank line for readability
 
         # Phase 5: Run application smoke tests
         print_header "Phase 5: Running Application Tests"
 
         if [ "$deploy_dev" = true ]; then
+            print_msg "$CYAN" "→ Running application tests for dev cluster..."
             run_smoke_tests "dev" false
         fi
 
         if [ "$deploy_prod" = true ]; then
+            print_msg "$CYAN" "→ Running application tests for prod cluster..."
             run_smoke_tests "prod" false
         fi
 
         if [ "$deploy_mgmt" = true ] && [ "$DEPLOYMENT_MODE" = "multi" ]; then
+            print_msg "$CYAN" "→ Running application tests for mgmt cluster..."
             run_smoke_tests "mgmt" false
         fi
+
+        print_msg "$GREEN" "✓ Phase 5 complete"
+        echo ""  # Add blank line for readability
     else
         print_msg "$YELLOW" "Skipping application deployment (--skip-apps enabled)"
+        echo ""  # Add blank line for readability
     fi
 
     # Print summary
