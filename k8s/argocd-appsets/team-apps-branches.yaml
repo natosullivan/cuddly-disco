@@ -1,0 +1,61 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: team-apps-branches
+  namespace: argocd
+spec:
+  # Use matrix generator to discover branch-based deployments dynamically
+  generators:
+  - matrix:
+      generators:
+      # Generator 1: Discover team apps from Git directories
+      - git:
+          repoURL: https://github.com/natosullivan/cuddly-disco.git
+          revision: HEAD
+          directories:
+          - path: k8s/team-apps/*
+
+      # Generator 2: Discover branch values files (exclude static v1, v2 versions)
+      - git:
+          repoURL: https://github.com/natosullivan/cuddly-disco.git
+          revision: HEAD
+          files:
+          - path: "k8s/team-apps/{{path.basename}}/values-dev-*.yaml"
+
+  # Template to generate Applications for each branch version
+  template:
+    metadata:
+      name: '{{path.basename}}-dev-{{path[3] | replace "values-dev-" "" | replace ".yaml" ""}}'
+      labels:
+        team: '{{path.basename}}'
+        environment: dev
+        type: branch-version
+        version: '{{path[3] | replace "values-dev-" "" | replace ".yaml" ""}}'
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/natosullivan/cuddly-disco.git
+        targetRevision: HEAD
+        path: '{{path}}'
+        helm:
+          valueFiles:
+          - values.yaml
+          - '{{path[3]}}'  # The discovered values file (e.g., values-dev-test-branch.yaml)
+
+      destination:
+        name: kind-dev
+        namespace: '{{path.basename}}'
+
+      syncPolicy:
+        automated:
+          prune: true      # Auto-delete when values file removed
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=false  # Branch versions reuse existing namespace
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
