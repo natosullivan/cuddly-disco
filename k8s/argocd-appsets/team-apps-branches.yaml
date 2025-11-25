@@ -5,14 +5,15 @@ metadata:
   namespace: argocd
 spec:
   # Use Git file generator to discover branch values files automatically
-  # Excludes static version files (values-dev.yaml, values-dev-v1.yaml, values-dev-v2.yaml)
+  # Note: This will match all values-dev-*.yaml files
+  # Static versions (values-dev.yaml) use the main team-apps ApplicationSet
+  # Template files are named *-TEMPLATE.yaml to avoid matching
   generators:
   - git:
       repoURL: https://github.com/natosullivan/cuddly-disco.git
       revision: HEAD
       files:
       - path: "k8s/team-apps/*/values-dev-*.yaml"
-        exclude: "{values-dev.yaml,values-dev-v[0-9].yaml,values-dev-v[0-9][0-9].yaml,*TEMPLATE*}"
 
   # Template to generate Applications for each branch version
   template:
