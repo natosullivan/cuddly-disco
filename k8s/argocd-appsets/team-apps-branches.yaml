@@ -4,48 +4,40 @@ metadata:
   name: team-apps-branches
   namespace: argocd
 spec:
-  # Use matrix generator to discover branch-based deployments dynamically
+  # Use Git file generator to discover branch values files automatically
   generators:
-  - matrix:
-      generators:
-      # Generator 1: Discover team apps from Git directories
-      - git:
-          repoURL: https://github.com/natosullivan/cuddly-disco.git
-          revision: HEAD
-          directories:
-          - path: k8s/team-apps/*
-
-      # Generator 2: Discover branch values files (exclude static v1, v2 versions)
-      - git:
-          repoURL: https://github.com/natosullivan/cuddly-disco.git
-          revision: HEAD
-          files:
-          - path: "k8s/team-apps/{{path.basename}}/values-dev-*.yaml"
+  - git:
+      repoURL: https://github.com/natosullivan/cuddly-disco.git
+      revision: HEAD
+      files:
+      - path: "k8s/team-apps/*/values-dev-*.yaml"
 
   # Template to generate Applications for each branch version
   template:
     metadata:
-      name: '{{path.basename}}-dev-{{path[3] | replace "values-dev-" "" | replace ".yaml" ""}}'
+      # Extract app name from path[2] and version from filename
+      # path = [k8s, team-apps, frontend, values-dev-test-branch.yaml]
+      # So path[2] = frontend, and we extract the version from path.filename
+      name: '{{path[2]}}-dev-{{path.filenameNormalized}}'
       labels:
-        team: '{{path.basename}}'
+        team: '{{path[2]}}'
         environment: dev
         type: branch-version
-        version: '{{path[3] | replace "values-dev-" "" | replace ".yaml" ""}}'
     spec:
       project: default
 
       source:
         repoURL: https://github.com/natosullivan/cuddly-disco.git
         targetRevision: HEAD
-        path: '{{path}}'
+        path: 'k8s/team-apps/{{path[2]}}'
         helm:
           valueFiles:
           - values.yaml
-          - '{{path[3]}}'  # The discovered values file (e.g., values-dev-test-branch.yaml)
+          - '{{path.filename}}'  # e.g., values-dev-test-branch.yaml
 
       destination:
         name: kind-dev
-        namespace: '{{path.basename}}'
+        namespace: '{{path[2]}}'
 
       syncPolicy:
         automated:
