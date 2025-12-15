@@ -27,7 +27,7 @@ gateway:
 # Frontend configuration
 config:
   location: "Development (branch: test-branch)"
-  backendUrl: "http://backend-dev-v1-backend-app.backend.svc.cluster.local:5000"
+  backendUrl: "http://backend-service.backend.svc.cluster.local:5000"
 
 # Lower resource limits for branch versions
 resources:
