@@ -19,11 +19,12 @@ spec:
   template:
     metadata:
       # Extract app name from path[2] and version from filename
-      # path = [k8s, team-apps, frontend, values-dev-test-branch.yaml]
+      # path = [k8s, team-apps, frontend] (directory only, excludes filename)
       # path[2] = frontend
-      # path.basenameNormalized = values-dev-test-branch (without .yaml)
-      # We want: frontend-dev-test-branch
-      name: '{{path[2]}}-{{path.basenameNormalized}}'
+      # path.filenameNormalized = values-dev-test-branch (filename without .yaml)
+      # Strip "values-" prefix to get: dev-test-branch
+      # Result: frontend-dev-test-branch
+      name: '{{path[2]}}-{{path.filenameNormalized | replace "values-" ""}}'
       labels:
         team: '{{path[2]}}'
         environment: dev
