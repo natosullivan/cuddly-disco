@@ -29,9 +29,12 @@ echo ""
 if [ "$CLUSTER_NAME" = "kind-mgmt" ]; then
     if [ "$DEPLOYMENT_MODE" = "multi" ]; then
         # Multi-cluster mode: check ApplicationSet and generated apps
-        APPS_TO_CHECK=("backend-dev" "backend-prod" "frontend-dev" "frontend-prod")
+        # Use patterns to match versioned apps (backend-dev-v1, backend-dev-v2, etc.)
+        APPS_TO_CHECK=()
         CHECK_APPLICATIONSET=true
         CHECK_LOCAL_APPS=false
+        CHECK_APP_PATTERNS=true
+        APP_PATTERNS=("backend-dev" "backend-prod" "frontend-dev" "frontend-prod")
     else
         # Mgmt cluster in single mode - no apps deployed here
         echo "SKIP: No applications deployed to mgmt cluster in single-cluster mode"
@@ -72,6 +75,24 @@ fi
 
 # Test 2: Check ArgoCD Applications (mgmt or single mode)
 if [ "$CHECK_APPLICATIONSET" = true ] || [ "$CHECK_LOCAL_APPS" = true ]; then
+    # If using patterns, find matching apps first
+    if [ "${CHECK_APP_PATTERNS:-false}" = true ]; then
+        echo "Finding applications matching patterns..."
+        for pattern in "${APP_PATTERNS[@]}"; do
+            matching_apps=$(kubectl get applications -n argocd -o name 2>/dev/null | grep "$pattern" | sed 's|application.argoproj.io/||' || echo "")
+            if [ -n "$matching_apps" ]; then
+                while IFS= read -r app; do
+                    [ -n "$app" ] && APPS_TO_CHECK+=("$app")
+                done <<< "$matching_apps"
+                print_test_result "PASS" "Found applications matching pattern '$pattern': $(echo "$matching_apps" | tr '\n' ' ')"
+            else
+                print_test_result "FAIL" "No applications found matching pattern '$pattern'"
+            fi
+        done
+        echo ""
+    fi
+
+    # Check each application
     for app in "${APPS_TO_CHECK[@]}"; do
         echo "Checking ArgoCD application: $app"
 

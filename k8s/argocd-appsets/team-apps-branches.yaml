@@ -11,7 +11,7 @@ spec:
   generators:
   - git:
       repoURL: https://github.com/natosullivan/cuddly-disco.git
-      revision: HEAD
+      revision: feature/branch-versioning  # TODO: Change to HEAD before merging to main
       files:
       - path: "k8s/team-apps/*/values-dev-*.yaml"
 
@@ -20,8 +20,10 @@ spec:
     metadata:
       # Extract app name from path[2] and version from filename
       # path = [k8s, team-apps, frontend, values-dev-test-branch.yaml]
-      # So path[2] = frontend, and we extract the version from path.filename
-      name: '{{path[2]}}-dev-{{path.filenameNormalized}}'
+      # path[2] = frontend
+      # path.basenameNormalized = values-dev-test-branch (without .yaml)
+      # We want: frontend-dev-test-branch
+      name: '{{path[2]}}-{{path.basenameNormalized}}'
       labels:
         team: '{{path[2]}}'
         environment: dev
@@ -31,7 +33,7 @@ spec:
 
       source:
         repoURL: https://github.com/natosullivan/cuddly-disco.git
-        targetRevision: HEAD
+        targetRevision: feature/branch-versioning  # TODO: Change to HEAD before merging to main
         path: 'k8s/team-apps/{{path[2]}}'
         helm:
           valueFiles:

@@ -64,3 +64,6 @@ terraform.rc
 
 # Terraform-generated Gateway manifests (dynamically created by Istio module)
 infrastructure/modules/istio/gateway-*.yaml
+
+# Deployment logs
+infrastructure/logs/

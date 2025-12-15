@@ -16,6 +16,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SMOKE_TESTS_DIR="$SCRIPT_DIR/smoke-tests"
+LOG_DIR="$SCRIPT_DIR/logs"
+
+# Create log directory
+mkdir -p "$LOG_DIR"
 
 # Color codes
 RED='\033[0;31m'
@@ -151,6 +155,46 @@ cluster_exists() {
     docker ps --format '{{.Names}}' | grep -q "kind-${cluster_name}-control-plane"
 }
 
+# Show progress from terraform log file
+show_terraform_progress() {
+    local log_file=$1
+    local cluster_name=$2
+
+    # Monitor log file and show key progress messages
+    tail -f "$log_file" 2>/dev/null | while IFS= read -r line; do
+        # Show key terraform progress messages
+        if echo "$line" | grep -q "kind_cluster.this: Creating..."; then
+            print_msg "$CYAN" "  → Creating Kind cluster..."
+        elif echo "$line" | grep -q "kind_cluster.this: Still creating..."; then
+            # Show periodic updates every 10s
+            if echo "$line" | grep -q "10s elapsed\|20s elapsed\|30s elapsed\|40s elapsed\|50s elapsed\|1m0s elapsed"; then
+                local elapsed=$(echo "$line" | grep -o '[0-9]*s elapsed\|[0-9]*m[0-9]*s elapsed')
+                print_msg "$CYAN" "  → Still creating cluster... ($elapsed)"
+            fi
+        elif echo "$line" | grep -q "kind_cluster.this: Creation complete"; then
+            print_msg "$GREEN" "  ✓ Kind cluster created"
+        elif echo "$line" | grep -q "kubernetes_namespace.*: Creating..."; then
+            local ns=$(echo "$line" | grep -o 'kubernetes_namespace\.[^:]*' | cut -d. -f2)
+            print_msg "$CYAN" "  → Creating namespace: $ns"
+        elif echo "$line" | grep -q "helm_release.*istio.*: Creating..."; then
+            print_msg "$CYAN" "  → Installing Istio..."
+        elif echo "$line" | grep -q "helm_release.*argocd.*: Creating..."; then
+            print_msg "$CYAN" "  → Installing ArgoCD..."
+        elif echo "$line" | grep -q "helm_release.*: Still creating..."; then
+            if echo "$line" | grep -q "1m0s elapsed\|2m0s elapsed\|3m0s elapsed"; then
+                local component=$(echo "$line" | grep -o 'helm_release\.[^:]*' | cut -d. -f2)
+                local elapsed=$(echo "$line" | grep -o '[0-9]*m[0-9]*s elapsed')
+                print_msg "$CYAN" "  → Still installing $component... ($elapsed)"
+            fi
+        elif echo "$line" | grep -q "Apply complete!"; then
+            print_msg "$GREEN" "  ✓ Terraform apply complete"
+            break
+        elif echo "$line" | grep -qE "Error:|error:"; then
+            print_msg "$RED" "  ✗ Error detected - check log: $log_file"
+        fi
+    done
+}
+
 # Check prerequisites
 check_prerequisites() {
     print_header "Checking Prerequisites"
@@ -182,8 +226,10 @@ check_prerequisites() {
 deploy_cluster() {
     local cluster_name=$1
     local cluster_dir="$SCRIPT_DIR/$cluster_name"
+    local log_file="$LOG_DIR/${cluster_name}-deploy.log"
 
     print_header "Deploying Cluster: kind-$cluster_name"
+    print_msg "$CYAN" "→ Logging to: $log_file"
 
     # Check if cluster already exists
     if cluster_exists "$cluster_name"; then
@@ -201,17 +247,48 @@ deploy_cluster() {
 
     print_msg "$CYAN" "→ Running terraform init..."
     cd "$cluster_dir"
-    if [ "$cluster_name" = "mgmt" ]; then
-        # Mgmt cluster needs -upgrade for ArgoCD provider
-        terraform init -upgrade
-    else
-        terraform init
-    fi
+    {
+        echo "=== Terraform Init - $(date) ==="
+        if [ "$cluster_name" = "mgmt" ]; then
+            # Mgmt cluster needs -upgrade for ArgoCD provider
+            terraform init -upgrade
+        else
+            terraform init
+        fi
+        echo ""
+    } >> "$log_file" 2>&1
 
     print_msg "$CYAN" "→ Running terraform apply..."
-    terraform apply -auto-approve
 
-    print_msg "$GREEN" "✓ Cluster kind-$cluster_name created successfully"
+    # Start terraform apply in background and monitor progress
+    {
+        echo "=== Terraform Apply - $(date) ==="
+        terraform apply -auto-approve
+        echo ""
+    } >> "$log_file" 2>&1 &
+
+    local tf_pid=$!
+
+    # Show progress while terraform runs
+    show_terraform_progress "$log_file" "$cluster_name" &
+    local progress_pid=$!
+
+    # Wait for terraform to complete
+    wait $tf_pid
+    local tf_exit_code=$?
+
+    # Stop the progress monitor
+    kill $progress_pid 2>/dev/null || true
+    wait $progress_pid 2>/dev/null || true
+
+    if [ $tf_exit_code -eq 0 ]; then
+        print_msg "$GREEN" "✓ Cluster kind-$cluster_name created successfully"
+    else
+        print_msg "$RED" "✗ Cluster kind-$cluster_name deployment failed (exit code: $tf_exit_code)"
+        print_msg "$YELLOW" "  Check log file: $log_file"
+        cd "$SCRIPT_DIR"
+        return 1
+    fi
     echo ""
 
     # Return to script directory
@@ -568,6 +645,10 @@ main() {
 
         print_msg "$GREEN" "✓ Phase 4 complete"
         echo ""  # Add blank line for readability
+
+        # Wait for Gateway to be fully ready before running tests
+        print_msg "$CYAN" "→ Waiting 30 seconds for Gateway to be fully ready..."
+        sleep 30
 
         # Phase 5: Run application smoke tests
         print_header "Phase 5: Running Application Tests"
