@@ -5,26 +5,25 @@ metadata:
   namespace: argocd
 spec:
   # Use Git file generator to discover branch values files automatically
-  # Note: This will match all values-dev-*.yaml files
+  # Matches files in branches/ subdirectory: dev-*.yaml and prod-*.yaml
   # Static versions (values-dev.yaml) use the main team-apps ApplicationSet
-  # Template files are named *-TEMPLATE.yaml to avoid matching
+  # Template files (TEMPLATE-*.yaml) won't match the pattern
   generators:
   - git:
       repoURL: https://github.com/natosullivan/cuddly-disco.git
       revision: feature/branch-versioning  # TODO: Change to HEAD before merging to main
       files:
-      - path: "k8s/team-apps/*/values-dev-*.yaml"
+      - path: "k8s/team-apps/*/branches/dev-*.yaml"
 
   # Template to generate Applications for each branch version
   template:
     metadata:
       # Extract app name from path[2] and version from filename
-      # path = [k8s, team-apps, frontend] (directory only, excludes filename)
+      # path = [k8s, team-apps, frontend, branches] (directory only, excludes filename)
       # path[2] = frontend
-      # path.filenameNormalized = values-dev-test-branch (filename without .yaml)
-      # Strip "values-" prefix to get: dev-test-branch
+      # path.filenameNormalized = dev-test-branch (filename without .yaml)
       # Result: frontend-dev-test-branch
-      name: '{{path[2]}}-{{path.filenameNormalized | replace "values-" ""}}'
+      name: '{{path[2]}}-{{path.filenameNormalized}}'
       labels:
         team: '{{path[2]}}'
         environment: dev
@@ -39,7 +38,7 @@ spec:
         helm:
           valueFiles:
           - values.yaml
-          - '{{path.filename}}'  # e.g., values-dev-test-branch.yaml
+          - 'branches/{{path.filename}}'  # e.g., branches/dev-test-branch.yaml
 
       destination:
         name: kind-dev
