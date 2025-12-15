@@ -4,6 +4,9 @@ metadata:
   name: team-apps-branches
   namespace: argocd
 spec:
+  # Enable Go template syntax for string manipulation (splitList, etc.)
+  goTemplate: true
+
   # Use Git file generator to discover branch values files automatically
   # Matches files in branches/ subdirectory: dev-*.yaml and prod-*.yaml
   # Static versions (values-dev.yaml) use the main team-apps ApplicationSet
@@ -13,19 +16,19 @@ spec:
       repoURL: https://github.com/natosullivan/cuddly-disco.git
       revision: feature/branch-versioning  # TODO: Change to HEAD before merging to main
       files:
-      - path: "k8s/team-apps/*/branches/dev-*.yaml"
+      - path: "k8s/team-apps/*/branches/dev-*.yaml" 
 
   # Template to generate Applications for each branch version
   template:
     metadata:
       # Extract app name from path[2] and version from filename
-      # path = [k8s, team-apps, frontend, branches] (directory only, excludes filename)
-      # path[2] = frontend
-      # path.filenameNormalized = dev-test-branch (filename without .yaml)
+      # .path.segments = [k8s, team-apps, frontend, branches] (array of path segments)
+      # index .path.segments 2 = frontend
+      # .path.filename = dev-test-branch.yaml, strip .yaml extension
       # Result: frontend-dev-test-branch
-      name: '{{path[2]}}-{{path.filenameNormalized}}'
+      name: '{{ index .path.segments 2 }}-{{ index (splitList "." .path.filename) 0 }}'
       labels:
-        team: '{{path[2]}}'
+        team: '{{ index .path.segments 2 }}'
         environment: dev
         type: branch-version
     spec:
@@ -34,15 +37,15 @@ spec:
       source:
         repoURL: https://github.com/natosullivan/cuddly-disco.git
         targetRevision: feature/branch-versioning  # TODO: Change to HEAD before merging to main
-        path: 'k8s/team-apps/{{path[2]}}'
+        path: 'k8s/team-apps/{{ index .path.segments 2 }}'
         helm:
           valueFiles:
           - values.yaml
-          - 'branches/{{path.filename}}'  # e.g., branches/dev-test-branch.yaml
+          - 'branches/{{ .path.filename }}'  # e.g., branches/dev-test-branch.yaml
 
       destination:
         name: kind-dev
-        namespace: '{{path[2]}}'
+        namespace: '{{ index .path.segments 2 }}'
 
       syncPolicy:
         automated:
