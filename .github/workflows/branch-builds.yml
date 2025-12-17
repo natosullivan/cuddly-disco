@@ -1,0 +1,192 @@
+name: Branch Builds
+
+on:
+  push:
+    branches-ignore:
+      - main
+  workflow_dispatch:
+
+# Default permissions - restrictive by default
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.changes.outputs.frontend }}
+      backend: ${{ steps.changes.outputs.backend }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed files
+        id: changes
+        run: |
+          # Get the base branch (usually main)
+          BASE_BRANCH="origin/main"
+
+          # Check if main branch exists
+          if ! git rev-parse --verify $BASE_BRANCH >/dev/null 2>&1; then
+            echo "Base branch not found, checking all files"
+            FRONTEND_CHANGED=true
+            BACKEND_CHANGED=true
+          else
+            # Get list of changed files compared to main
+            CHANGED_FILES=$(git diff --name-only $BASE_BRANCH...HEAD)
+
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
+
+            # Check if frontend files changed
+            if echo "$CHANGED_FILES" | grep -q "^apps/frontend/"; then
+              FRONTEND_CHANGED=true
+              echo "✅ Frontend changes detected"
+            else
+              FRONTEND_CHANGED=false
+              echo "ℹ️ No frontend changes"
+            fi
+
+            # Check if backend files changed
+            if echo "$CHANGED_FILES" | grep -q "^apps/backend/"; then
+              BACKEND_CHANGED=true
+              echo "✅ Backend changes detected"
+            else
+              BACKEND_CHANGED=false
+              echo "ℹ️ No backend changes"
+            fi
+          fi
+
+          # Set outputs
+          echo "frontend=$FRONTEND_CHANGED" >> $GITHUB_OUTPUT
+          echo "backend=$BACKEND_CHANGED" >> $GITHUB_OUTPUT
+
+  get-version-info:
+    name: Get Version Info
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    # Only run if at least one app changed
+    if: needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.backend == 'true'
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sanitized-branch: ${{ steps.version.outputs.sanitized-branch }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate version string
+        id: version
+        run: |
+          # Get the base version from latest git tag, or use package.json version
+          if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+            BASE_VERSION=$(git describe --tags --abbrev=0)
+            # Remove 'v' prefix if present
+            BASE_VERSION=${BASE_VERSION#v}
+          else
+            # Fallback to package.json version
+            BASE_VERSION=$(grep -o '"version": *"[^"]*"' package.json | head -1 | cut -d'"' -f4)
+          fi
+
+          # Get current branch name
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+
+          # Sanitize branch name using our script
+          chmod +x infrastructure/sanitize-branch-name.sh
+          SANITIZED_BRANCH=$(infrastructure/sanitize-branch-name.sh "$BRANCH_NAME")
+
+          # Create version string: vX.X.X-sanitized-branch-name
+          VERSION="v${BASE_VERSION}-${SANITIZED_BRANCH}"
+
+          echo "Base version: $BASE_VERSION"
+          echo "Branch name: $BRANCH_NAME"
+          echo "Sanitized branch: $SANITIZED_BRANCH"
+          echo "Full version: $VERSION"
+
+          # Set outputs
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "sanitized-branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+
+  build-branch-frontend:
+    name: Build Frontend (Branch)
+    runs-on: ubuntu-latest
+    needs: [detect-changes, get-version-info]
+    # Only run if frontend changed
+    if: needs.detect-changes.outputs.frontend == 'true'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/frontend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/frontend:${{ needs.get-version-info.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image published
+        run: |
+          echo "✅ Frontend image published:"
+          echo "   ghcr.io/${{ github.repository }}/frontend:${{ needs.get-version-info.outputs.version }}"
+
+  build-branch-backend:
+    name: Build Backend (Branch)
+    runs-on: ubuntu-latest
+    needs: [detect-changes, get-version-info]
+    # Only run if backend changed
+    if: needs.detect-changes.outputs.backend == 'true'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/backend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/backend:${{ needs.get-version-info.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image published
+        run: |
+          echo "✅ Backend image published:"
+          echo "   ghcr.io/${{ github.repository }}/backend:${{ needs.get-version-info.outputs.version }}"
