@@ -219,7 +219,15 @@ check_prerequisites() {
         exit 1
     fi
 
+    # Check if Docker daemon is running
+    if ! docker info &> /dev/null; then
+        print_msg "$RED" "ERROR: Docker daemon is not running"
+        print_msg "$YELLOW" "Please start Docker Desktop and try again."
+        exit 1
+    fi
+
     print_msg "$GREEN" "✓ All prerequisites met (docker, kubectl, terraform)"
+    print_msg "$GREEN" "✓ Docker daemon is running"
 }
 
 # Deploy a single cluster
