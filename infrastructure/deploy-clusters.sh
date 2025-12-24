@@ -412,10 +412,8 @@ deploy_apps_multi_mode() {
 
     export KUBECONFIG="$HOME/.kube/kind-kind-mgmt"
 
-    print_msg "$CYAN" "→ Deploying team-apps ApplicationSet..."
-    kubectl apply -f "$SCRIPT_DIR/../k8s/argocd-appsets/team-apps.yaml"
-
-    print_msg "$CYAN" "→ Waiting for ApplicationSet to generate applications..."
+    print_msg "$CYAN" "→ ApplicationSets deployed via Terraform"
+    print_msg "$CYAN" "→ Waiting for ApplicationSets to generate applications..."
     sleep 10
 
     print_msg "$CYAN" "→ Checking generated applications..."

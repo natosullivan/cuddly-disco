@@ -34,3 +34,11 @@ provider "argocd" {
     client_key             = module.k8s.client_key
   }
 }
+
+provider "kubectl" {
+  host                   = module.k8s.cluster_endpoint
+  client_certificate     = module.k8s.client_certificate
+  client_key             = module.k8s.client_key
+  cluster_ca_certificate = module.k8s.cluster_ca_certificate
+  load_config_file       = false
+}

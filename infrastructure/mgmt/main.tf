@@ -20,3 +20,14 @@ module "argocd" {
   server_nodeport     = 30080
   enable_insecure     = true # For local management without TLS
 }
+
+module "applicationsets" {
+  source = "../modules/applicationsets"
+
+  # Depends on ArgoCD being ready
+  depends_on = [module.argocd]
+
+  team_apps_file          = "${path.module}/../../k8s/argocd-appsets/team-apps.yaml"
+  team_apps_branches_file = "${path.module}/../../k8s/argocd-appsets/team-apps-branches.yaml"
+  argocd_ready            = module.argocd
+}
