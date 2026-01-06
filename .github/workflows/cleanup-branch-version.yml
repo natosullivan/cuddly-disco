@@ -1,0 +1,175 @@
+name: Cleanup Branch Version
+
+on:
+  pull_request:
+    types: [closed]
+  delete:
+
+# Restrictive default permissions
+permissions:
+  contents: read
+
+jobs:
+  cleanup-branch-deployment:
+    name: Cleanup Branch Deployment
+    runs-on: ubuntu-latest
+    # Elevated permissions for this specific job
+    permissions:
+      contents: write  # Required to commit deletions
+
+    steps:
+      - name: Extract branch name
+        id: extract-branch
+        run: |
+          # Different event types have different payload structures
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+            EVENT_TYPE="PR closed"
+          elif [ "${{ github.event_name }}" = "delete" ]; then
+            # github.event.ref is already stripped (no refs/heads/)
+            BRANCH_NAME="${{ github.event.ref }}"
+            EVENT_TYPE="Branch deleted"
+          else
+            echo "❌ Unexpected event type: ${{ github.event_name }}"
+            exit 1
+          fi
+
+          echo "📋 Event: $EVENT_TYPE"
+          echo "🌿 Branch: $BRANCH_NAME"
+
+          # Safety check: never cleanup main
+          if [ "$BRANCH_NAME" = "main" ]; then
+            echo "⏭️  Skipping cleanup for main branch"
+            echo "should-cleanup=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "should-cleanup=true" >> $GITHUB_OUTPUT
+
+      - name: Checkout code
+        if: steps.extract-branch.outputs.should-cleanup == 'true'
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.BOT_GITHUB_TOKEN }}
+          fetch-depth: 1  # Shallow clone sufficient for cleanup
+
+      - name: Sanitize branch name
+        if: steps.extract-branch.outputs.should-cleanup == 'true'
+        id: sanitize
+        run: |
+          chmod +x infrastructure/sanitize-branch-name.sh
+          SANITIZED_BRANCH=$(infrastructure/sanitize-branch-name.sh "${{ steps.extract-branch.outputs.branch-name }}")
+
+          if [ -z "$SANITIZED_BRANCH" ]; then
+            echo "❌ Error: Sanitized branch name is empty"
+            exit 1
+          fi
+
+          echo "✅ Sanitized branch: $SANITIZED_BRANCH"
+          echo "sanitized-branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Configure Git
+        if: steps.extract-branch.outputs.should-cleanup == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Delete branch values files
+        if: steps.extract-branch.outputs.should-cleanup == 'true'
+        id: delete-files
+        env:
+          SANITIZED_BRANCH: ${{ steps.sanitize.outputs.sanitized-branch }}
+        run: |
+          FRONTEND_FILE="k8s/team-apps/frontend/branches/dev-${SANITIZED_BRANCH}.yaml"
+          BACKEND_FILE="k8s/team-apps/backend/branches/dev-${SANITIZED_BRANCH}.yaml"
+
+          FILES_DELETED=0
+          FRONTEND_STATUS="⏭️ not found"
+          BACKEND_STATUS="⏭️ not found"
+
+          # Delete frontend values file if exists
+          if [ -f "$FRONTEND_FILE" ]; then
+            echo "🗑️  Deleting: $FRONTEND_FILE"
+            git rm "$FRONTEND_FILE"
+            FILES_DELETED=$((FILES_DELETED + 1))
+            FRONTEND_STATUS="✅ deleted"
+          else
+            echo "ℹ️  Not found: $FRONTEND_FILE"
+          fi
+
+          # Delete backend values file if exists
+          if [ -f "$BACKEND_FILE" ]; then
+            echo "🗑️  Deleting: $BACKEND_FILE"
+            git rm "$BACKEND_FILE"
+            FILES_DELETED=$((FILES_DELETED + 1))
+            BACKEND_STATUS="✅ deleted"
+          else
+            echo "ℹ️  Not found: $BACKEND_FILE"
+          fi
+
+          echo "files-deleted=$FILES_DELETED" >> $GITHUB_OUTPUT
+          echo "frontend-status=$FRONTEND_STATUS" >> $GITHUB_OUTPUT
+          echo "backend-status=$BACKEND_STATUS" >> $GITHUB_OUTPUT
+
+      - name: Commit and push cleanup
+        if: steps.extract-branch.outputs.should-cleanup == 'true'
+        env:
+          BRANCH_NAME: ${{ steps.extract-branch.outputs.branch-name }}
+          SANITIZED_BRANCH: ${{ steps.sanitize.outputs.sanitized-branch }}
+          FILES_DELETED: ${{ steps.delete-files.outputs.files-deleted }}
+          FRONTEND_STATUS: ${{ steps.delete-files.outputs.frontend-status }}
+          BACKEND_STATUS: ${{ steps.delete-files.outputs.backend-status }}
+        run: |
+          # Check if there are staged changes
+          if git diff --staged --quiet; then
+            echo "ℹ️  No values files to cleanup (branch was never deployed)"
+            exit 0
+          fi
+
+          # Show what will be deleted
+          echo "📝 Files to be deleted:"
+          git diff --staged --name-only
+
+          # Commit with [skip ci] to prevent workflow loops
+          git commit -m "chore(helm): Cleanup branch deployment for ${SANITIZED_BRANCH} [skip ci]
+
+Auto-generated Helm values files removed:
+- Frontend: ${FRONTEND_STATUS}
+- Backend: ${BACKEND_STATUS}
+
+Branch: ${BRANCH_NAME}
+Trigger: Branch deleted or PR closed
+
+ArgoCD will automatically prune associated Kubernetes resources.
+
+Generated by GitHub Actions
+Workflow: ${GITHUB_WORKFLOW}
+Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          # Push to main branch (values files are on main)
+          git push origin HEAD:main
+
+          echo "✅ Cleanup complete: ${FILES_DELETED} file(s) deleted and committed"
+
+      - name: Cleanup summary
+        if: steps.extract-branch.outputs.should-cleanup == 'true'
+        env:
+          BRANCH_NAME: ${{ steps.extract-branch.outputs.branch-name }}
+          SANITIZED_BRANCH: ${{ steps.sanitize.outputs.sanitized-branch }}
+          FILES_DELETED: ${{ steps.delete-files.outputs.files-deleted }}
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🧹 Branch Deployment Cleanup Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Branch: ${BRANCH_NAME}"
+          echo "Sanitized: ${SANITIZED_BRANCH}"
+          echo "Files deleted: ${FILES_DELETED}"
+          echo ""
+          if [ "${FILES_DELETED}" -gt 0 ]; then
+            echo "✅ ArgoCD will automatically prune Kubernetes resources within ~2 minutes"
+            echo "📊 Check ArgoCD UI to verify cleanup"
+          else
+            echo "ℹ️  No deployment found for this branch"
+          fi
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
